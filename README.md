@@ -1,6 +1,7 @@
 # ElysianDB TypeScript Client SDK
 [![npm version](https://img.shields.io/npm/v/@elysiandbjs/client)](https://www.npmjs.com/package/@elysiandbjs/client)
 [![npm downloads](https://img.shields.io/npm/dm/@elysiandbjs/client)](https://www.npmjs.com/package/@elysiandbjs/client)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 The official TypeScript and JavaScript client for ElysianDB. This SDK provides a simple, typed, and framework-agnostic interface to the ElysianDB HTTP API.
 
