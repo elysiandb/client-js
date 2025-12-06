@@ -1,0 +1,8 @@
+.idea/
+src/
+demo.js
+demo.ts
+demo/
+*.log
+tsconfig.json
+Makefile
