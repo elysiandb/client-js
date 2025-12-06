@@ -1,0 +1,31 @@
+{
+  "name": "@elysiandbjs/client",
+  "version": "0.0.3",
+  "description": "Official TypeScript/JavaScript client for ElysianDB",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "prepare": "npm run build",
+    "demo": "ts-node src/demo.ts"
+  },
+  "keywords": [
+    "elysiandb",
+    "database",
+    "kv",
+    "rest",
+    "client",
+    "sdk"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "Taymour Negib",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.0"
+  }
+}
