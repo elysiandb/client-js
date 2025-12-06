@@ -22,17 +22,7 @@ login:
 	fi
 
 publish: build login
-	@echo "Checking version before publish..."
-	@if git diff --name-only | grep -q package.json; then \
-		echo "Warning: package.json modified but not committed."; \
-	fi
-
-	@echo "Publishing $(PACKAGE_NAME) to npm..."
+	npm version patch
+	npm run build
 	npm publish --access public
-
-	@echo ""
-	@echo "------------------------------------------"
-	@echo "Published successfully!"
-	@echo "Install with:"
-	@echo "  npm install $(PACKAGE_NAME)"
-	@echo "------------------------------------------"
+	git push --follow-tags
