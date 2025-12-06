@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ElysianDB = void 0;
 const utils_1 = require("./utils");
+const transaction_1 = require("./transaction");
 class ElysianDB {
     constructor(options) {
         this.baseUrl = options.baseUrl.replace(/\/+$/, "");
@@ -13,26 +14,25 @@ class ElysianDB {
             "Content-Type": "application/json",
             ...init.headers,
         };
-        if (this.token) {
+        if (this.token)
             headers["Authorization"] = `Bearer ${this.token}`;
-        }
-        const res = await fetch(url, {
-            ...init,
-            headers,
-        });
-        if (!res.ok) {
-            const text = await res.text().catch(() => "");
-            throw new Error(`ElysianDB error ${res.status} ${res.statusText} – ${text}`);
-        }
+        const res = await fetch(url, { ...init, headers });
         const text = await res.text();
-        if (!text) {
-            return undefined;
-        }
+        return text ? JSON.parse(text) : undefined;
+    }
+    rawRequest(path, init) {
+        return this.request(path, init);
+    }
+    async transaction(fn) {
+        const tx = new transaction_1.TransactionSession(this);
+        await tx.begin();
         try {
-            return JSON.parse(text);
+            await fn(tx);
+            await tx.commit();
         }
-        catch {
-            return text;
+        catch (err) {
+            await tx.rollback();
+            throw err;
         }
     }
     entity(name) {
@@ -42,35 +42,32 @@ class ElysianDB {
                 const qs = (0, utils_1.toQueryString)(options);
                 return this.request(`${basePath}${qs}`, { method: "GET" });
             },
-            get: (id) => {
-                return this.request(`${basePath}/${id}`, { method: "GET" });
-            },
-            create: (data) => {
-                return this.request(basePath, {
-                    method: "POST",
-                    body: JSON.stringify(data),
+            countWithOptions: async (options = {}) => {
+                const opts = { ...options, countOnly: true };
+                const qs = (0, utils_1.toQueryString)(opts);
+                const res = await this.request(`${basePath}${qs}`, {
+                    method: "GET",
                 });
-            },
-            update: (id, data) => {
-                return this.request(`${basePath}/${id}`, {
-                    method: "PUT",
-                    body: JSON.stringify(data),
-                });
-            },
-            delete: (id) => {
-                return this.request(`${basePath}/${id}`, {
-                    method: "DELETE",
-                });
+                return res.count;
             },
             count: () => {
                 return this.request(`${basePath}/count`, {
                     method: "GET",
                 });
             },
+            get: (id) => this.request(`${basePath}/${id}`, { method: "GET" }),
+            create: (data) => this.request(basePath, {
+                method: "POST",
+                body: JSON.stringify(data),
+            }),
+            update: (id, data) => this.request(`${basePath}/${id}`, {
+                method: "PUT",
+                body: JSON.stringify(data),
+            }),
+            delete: (id) => this.request(`${basePath}/${id}`, {
+                method: "DELETE",
+            }),
         };
-    }
-    rawRequest(path, init) {
-        return this.request(path, init);
     }
 }
 exports.ElysianDB = ElysianDB;
