@@ -2,6 +2,7 @@
 src/
 demo.js
 demo.ts
+dist/demo.ts
 demo/
 *.log
 tsconfig.json

@@ -9,6 +9,17 @@ The official TypeScript and JavaScript client for ElysianDB. This SDK provides a
 
 ElysianDB is a lightweight, high-performance key value datastore with an automatic REST API. The TypeScript client allows developers to interact with any ElysianDB instance using a clean and structured API.
 
+ElysianDB is a zero-config, auto-generated backend API and embedded data store.
+
+ElysianDB repository:
+https://github.com/elysiandb/elysiandb
+
+Docker:
+https://hub.docker.com/r/taymour/elysiandb
+
+Documentation:
+https://elysiandb.com/
+
 This client is compatible with:
 
 Node.js

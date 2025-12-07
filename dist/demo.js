@@ -22,7 +22,20 @@ async function main() {
         }
     });
     console.log("Created:", created);
-    created.title = "This is my new title";
+    const created2 = await articles.create({
+        title: "Second item",
+        tags: ["demo", "ts"],
+        author: {
+            "@entity": "author",
+            name: "Bob",
+            job: {
+                "@entity": "job",
+                designation: "Editor"
+            }
+        }
+    });
+    console.log("Created2:", created2);
+    created.title = "Updated title";
     await articles.update(created.id, created);
     const list = await db.entity(entityName).list({
         limit: 20,
@@ -32,15 +45,41 @@ async function main() {
             "author.name": { eq: "Alice" },
             "tags": { contains: "sdk" }
         },
-        sort: { "createdAt": "desc" },
+        sort: { "createdAt": "desc" }
     });
     console.log("List:", list);
-    const countSimple = await db.entity(entityName).count();
-    console.log("Simple count:", countSimple);
-    const listWithCount = await db.entity(entityName).countWithOptions({
+    const simpleCount = await db.entity(entityName).count();
+    console.log("Simple count:", simpleCount);
+    const filteredCount = await db.entity(entityName).countWithOptions({
+        includes: ["author"],
         filter: { "author.name": { eq: "Alice" } }
     });
-    console.log("Filtered count:", listWithCount);
+    console.log("Filtered count:", filteredCount);
+    const txResult = await db.transaction(async (tx) => {
+        await tx.write(entityName, {
+            title: "TX article",
+            tags: ["tx"],
+            author: {
+                "@entity": "author",
+                name: "Charlie",
+                job: {
+                    "@entity": "job",
+                    designation: "Reviewer"
+                }
+            }
+        });
+    });
+    console.log("TX result:", txResult);
+    const listAfterTx = await db.entity(entityName).list({
+        includes: ["author"]
+    });
+    console.log("List after TX:", listAfterTx);
+    const fetched = await articles.get(created.id);
+    console.log("Fetched:", fetched);
+    await articles.delete(created2.id);
+    console.log("Deleted item:", created2.id);
+    const finalCount = await articles.count();
+    console.log("Final count:", finalCount);
 }
 main().catch((err) => {
     console.error(err);
