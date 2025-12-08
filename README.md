@@ -126,7 +126,6 @@ const value = await articles.count();
 
 ```ts
 const value = await articles.countWithOptions({
-  includes: ["author"],
   filter: { "author.name": { eq: "Alice" } }
 });
 ```
