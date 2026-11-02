@@ -239,7 +239,9 @@ await books.count({ filter: { year: { lt: 1970 } } });  // matching documents
 
 ## 이름, ID, 키
 
-엔티티 이름, 문서 ID, 키, 사용자 이름, 훅 ID는 URL 경로에 들어가는데, ElysianDB 0.2.3은 이를 일관되게 디코딩하지 않습니다. 그래서 퍼센트 인코딩이 필요한 값은 쓸 수는 있어도 다시 읽지 못할 수 있습니다. 클라이언트는 영문자(`A-Z`, `a-z`), 숫자, `- _ . ! ~ * ' ( ) : @ $ & + , ; =`로만 이루어진 값을 허용하며, 공백, 악센트가 있는 문자, `/`, `?`, `#`, `%` 등 그 밖의 문자가 들어 있으면 `TypeError`를 던집니다. 모든 문서를 다시 읽을 수 있도록 `create()`와 `createMany()`도 전달된 `id`를 같은 방식으로 검사합니다.
+엔티티 이름, 문서 ID, 키, 사용자 이름, 훅 ID는 URL 경로에 들어가는데, ElysianDB 0.2.3은 이를 일관되게 디코딩하지 않습니다. 그래서 퍼센트 인코딩이 필요한 키나 ID는 쓸 수는 있어도 다시 읽지 못할 수 있습니다. 클라이언트는 영문자(`A-Z`, `a-z`), 숫자, `- _ . ! ~ * ' ( ) : @ $ & + , ; =`로만 이루어진 값을 허용하며, 공백, 악센트가 있는 문자, `/`, `?`, `#`, `%` 등 그 밖의 문자가 들어 있으면 `TypeError`를 던집니다. 모든 문서를 다시 읽을 수 있도록 `create()`와 `createMany()`도 전달된 `id`를 같은 방식으로 검사합니다.
+
+엔티티 이름은 더 엄격합니다. 영문자, 숫자, `_`, `-`, `.`만 쓸 수 있으며 `.`로 시작할 수 없습니다. ElysianDB는 엔티티 이름으로 저장소 키와 패턴을 만들기 때문에 `:`나 `*`가 들어가면 다른 엔티티에까지 영향을 줍니다. `db.entity("books:id").deleteAll()`은 모든 책을 삭제하게 됩니다. 다른 클라이언트가 다른 이름으로 만든 엔티티 타입은 `db.request()`와 `encodeURIComponent()`로 계속 접근할 수 있습니다.
 
 일부 값은 ElysianDB가 다른 라우트로 처리하거나 `fetch`가 URL에서 제거하기 때문에 거부됩니다:
 
@@ -249,6 +251,9 @@ await books.count({ filter: { year: { lt: 1970 } } });  // matching documents
 | `query`, `export`, `import`, `backup`, `restore`, `tx`, `entity`, `hook`, `acl`, `security` | 엔티티 이름 | `/api/query`는 Query API, `/api/export`는 내보내기 라우트이며, 나머지도 마찬가지입니다. |
 | `count`, `schema` | `get()`, `update()`, `create()`의 문서 ID | `GET /api/books/count`는 책의 개수를 셉니다. `exists()`와 `delete()`에서는 계속 사용할 수 있습니다. |
 | `mget` | `kv.get()`과 `kv.set()`의 키 | `GET /kv/mget`은 `mget()`의 라우트입니다. |
+| `*`가 들어간 키 | `kv.get()`과 `kv.set()`의 키 | `*`는 `mget()`과 `delete()`의 와일드카드입니다. |
+
+또한 ElysianDB 0.2.3은 일부 저장소 키를 대소문자 구분 없이 비교합니다. 대소문자만 다른 엔티티 이름은 사용하지 마세요. `Books`에 `deleteAll()`을 호출하면 `books`의 인덱스가 삭제됩니다.
 
 또한 클라이언트는 HTTP 리디렉션을 따르지 않습니다. 리디렉션을 따르면 자격 증명을 포함한 요청이 다른 URL로 다시 전송되기 때문입니다. 리디렉션은 새 위치를 알려 주는 `ElysianDBError`로 실패하며, 이 오류가 발생하면 서버 URL을 확인하세요.
 
@@ -395,7 +400,7 @@ await db.kv.mget(["greeting", "session:*"]); // { greeting: "hello", "session:42
 await db.kv.delete("session:*");             // `*` deletes every matching key
 ```
 
-값은 문자열입니다. 키는 [이름과 ID 규칙](#이름-id-키)을 따릅니다. `mget()`과 `delete()`에서 `*`는 와일드카드이며, `mget()`의 키에는 `,`를 쓸 수 없습니다. `mget()`은 프로토타입이 없는 객체를 반환하므로 `__proto__`를 포함한 모든 키가 자체 속성(own property)이 됩니다. `user` 모드에서 키–값 저장소를 사용하려면 관리자 권한이 필요합니다.
+값은 문자열입니다. 키는 [이름과 ID 규칙](#이름-id-키)을 따릅니다. `mget()`과 `delete()`에서 `*`는 와일드카드이며, 패턴은 대소문자를 구분하지 않습니다. 예를 들어 `delete("Cache:*")`는 `cache:1`도 삭제합니다. `mget()`의 키에는 `,`를 쓸 수 없습니다. `user` 모드에서 키–값 저장소를 사용하려면 관리자 권한이 필요합니다.
 
 ## 엔티티 타입, 스키마, 마이그레이션
 

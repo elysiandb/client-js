@@ -239,7 +239,9 @@ await books.count({ filter: { year: { lt: 1970 } } });  // matching documents
 
 ## Namen, ID's en sleutels
 
-Entiteitsnamen, document-ID's, sleutels, gebruikersnamen en hook-ID's komen in URL-paden terecht, en ElysianDB 0.2.3 decodeert ze niet consequent: een waarde die percent-encoding nodig heeft, kan wel worden weggeschreven maar niet meer worden teruggelezen. De client accepteert alleen waarden die bestaan uit letters (`A-Z`, `a-z`), cijfers en `- _ . ! ~ * ' ( ) : @ $ & + , ; =`, en gooit een `TypeError` voor al het andere, zoals spaties, letters met accenten, `/`, `?`, `#` of `%`. `create()` en `createMany()` controleren het `id` dat je meegeeft op dezelfde manier, zodat elk document ook weer teruggelezen kan worden.
+Entiteitsnamen, document-ID's, sleutels, gebruikersnamen en hook-ID's komen in URL-paden terecht, en ElysianDB 0.2.3 decodeert ze niet consequent: een sleutel of een ID waarvoor percent-encoding nodig is, kan wel worden weggeschreven maar niet meer worden teruggelezen. De client accepteert alleen waarden die bestaan uit letters (`A-Z`, `a-z`), cijfers en `- _ . ! ~ * ' ( ) : @ $ & + , ; =`, en gooit een `TypeError` voor al het andere, zoals spaties, letters met accenten, `/`, `?`, `#` of `%`. `create()` en `createMany()` controleren het `id` dat je meegeeft op dezelfde manier, zodat elk document ook weer teruggelezen kan worden.
+
+Voor entiteitsnamen gelden strengere regels: letters, cijfers, `_`, `-` en `.`, zonder `.` aan het begin. ElysianDB bouwt er zijn opslagsleutels en patronen mee op, dus `:` of `*` zouden bij andere entiteiten uitkomen: `db.entity("books:id").deleteAll()` zou alle boeken verwijderen. Entiteitstypen die een andere client met andere namen heeft aangemaakt, blijven bereikbaar met `db.request()` en `encodeURIComponent()`.
 
 Sommige waarden worden geweigerd omdat ElysianDB ze naar een andere route stuurt, of omdat `fetch` ze uit URL's verwijdert:
 
@@ -249,6 +251,9 @@ Sommige waarden worden geweigerd omdat ElysianDB ze naar een andere route stuurt
 | `query`, `export`, `import`, `backup`, `restore`, `tx`, `entity`, `hook`, `acl`, `security` | Entiteitsnaam | `/api/query` is de Query API, `/api/export` de export, enzovoort. |
 | `count`, `schema` | Document-ID in `get()`, `update()` en `create()` | `GET /api/books/count` telt de boeken. `exists()` en `delete()` accepteren ze wel. |
 | `mget` | Sleutel in `kv.get()` en `kv.set()` | `GET /kv/mget` is de route van `mget()`. |
+| Sleutels met `*` | Sleutel in `kv.get()` en `kv.set()` | `*` is de wildcard van `mget()` en `delete()`. |
+
+ElysianDB 0.2.3 vergelijkt sommige opslagsleutels bovendien hoofdletterongevoelig: gebruik geen entiteitsnamen die alleen in hoofd- en kleine letters verschillen, want `deleteAll()` op `Books` gooit de indexen van `books` weg.
 
 De client volgt ook nooit HTTP-redirects, omdat een redirect de request, inclusief inloggegevens, opnieuw naar een andere URL zou sturen. Een redirect mislukt met een `ElysianDBError` waarin de nieuwe locatie staat: krijg je er een, controleer dan de URL van de server.
 
@@ -395,7 +400,7 @@ await db.kv.mget(["greeting", "session:*"]); // { greeting: "hello", "session:42
 await db.kv.delete("session:*");             // `*` deletes every matching key
 ```
 
-Waarden zijn strings. Sleutels volgen de [regels voor namen en ID's](#namen-ids-en-sleutels): `*` is een wildcard in `mget()` en `delete()`, en sleutels voor `mget()` mogen geen `,` bevatten. `mget()` geeft een object zonder prototype terug, zodat elke sleutel, ook `__proto__`, een eigen property is. In `user`-modus vereist de sleutel–waardeopslag een admin.
+Waarden zijn strings. Sleutels volgen de [regels voor namen en ID's](#namen-ids-en-sleutels). `*` is een wildcard in `mget()` en `delete()`, en patronen zijn hoofdletterongevoelig: `delete("Cache:*")` verwijdert ook `cache:1`. Sleutels voor `mget()` mogen geen `,` bevatten. In `user`-modus vereist de sleutel–waardeopslag een admin.
 
 ## Entiteitstypen, schema's en migraties
 

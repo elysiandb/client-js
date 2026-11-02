@@ -239,7 +239,9 @@ await books.count({ filter: { year: { lt: 1970 } } });  // matching documents
 
 ## 名称、ID 与键
 
-实体名称、文档 ID、键、用户名和钩子 ID 都会出现在 URL 路径中，而 ElysianDB 0.2.3 对它们的解码并不一致：需要百分号编码的值可能写得进去，却读不回来。因此客户端只接受由字母（`A-Z`、`a-z`）、数字以及 `- _ . ! ~ * ' ( ) : @ $ & + , ; =` 组成的值，其他字符一律抛出 `TypeError`，例如空格、带重音的字母、`/`、`?`、`#` 或 `%`。`create()` 和 `createMany()` 也会以同样的方式检查你传入的 `id`，确保每个文档都能读回。
+实体名称、文档 ID、键、用户名和钩子 ID 都会出现在 URL 路径中，而 ElysianDB 0.2.3 对它们的解码并不一致：需要百分号编码的键或 ID 可能写得进去，却读不回来。因此客户端只接受由字母（`A-Z`、`a-z`）、数字以及 `- _ . ! ~ * ' ( ) : @ $ & + , ; =` 组成的值，其他字符一律抛出 `TypeError`，例如空格、带重音的字母、`/`、`?`、`#` 或 `%`。`create()` 和 `createMany()` 也会以同样的方式检查你传入的 `id`，确保每个文档都能读回。
+
+实体名称的限制更严格：只能包含字母、数字、`_`、`-` 和 `.`，且不能以 `.` 开头。ElysianDB 会用实体名称构造存储键和匹配模式，因此 `:` 或 `*` 会波及其他实体：`db.entity("books:id").deleteAll()` 会删除所有书。由其他客户端以其他名称创建的实体类型，仍可通过 `db.request()` 和 `encodeURIComponent()` 访问。
 
 有些值会被拒绝，原因是 ElysianDB 会把它们路由到别处，或者 `fetch` 会把它们从 URL 中移除：
 
@@ -249,6 +251,9 @@ await books.count({ filter: { year: { lt: 1970 } } });  // matching documents
 | `query`、`export`、`import`、`backup`、`restore`、`tx`、`entity`、`hook`、`acl`、`security` | 实体名称 | `/api/query` 是 Query API，`/api/export` 是导出接口，以此类推。 |
 | `count`、`schema` | `get()`、`update()` 和 `create()` 中的文档 ID | `GET /api/books/count` 用于统计书的数量。`exists()` 和 `delete()` 仍然接受这两个值。 |
 | `mget` | `kv.get()` 和 `kv.set()` 中的键 | `GET /kv/mget` 是 `mget()` 的路由。 |
+| 包含 `*` 的键 | `kv.get()` 和 `kv.set()` 中的键 | `*` 是 `mget()` 和 `delete()` 的通配符。 |
+
+此外，ElysianDB 0.2.3 在比较某些存储键时不区分大小写：不要使用仅大小写不同的实体名称，因为对 `Books` 调用 `deleteAll()` 会删除 `books` 的索引。
 
 客户端也从不跟随 HTTP 重定向，因为重定向会把请求连同凭据一起重放到另一个 URL 上。遇到重定向时，请求会以 `ElysianDBError` 失败，错误中会给出新的地址：如果遇到这种情况，请检查服务器的 URL。
 
@@ -395,7 +400,7 @@ await db.kv.mget(["greeting", "session:*"]); // { greeting: "hello", "session:42
 await db.kv.delete("session:*");             // `*` deletes every matching key
 ```
 
-值都是字符串。键遵循[名称与 ID 的规则](#名称id-与键)：在 `mget()` 和 `delete()` 中，`*` 是通配符；`mget()` 的键不能包含 `,`。`mget()` 返回一个没有原型的对象，因此每个键（包括 `__proto__`）都是它的自有属性。在 `user` 模式下，键值存储需要管理员权限。
+值都是字符串。键遵循[名称与 ID 的规则](#名称id-与键)。在 `mget()` 和 `delete()` 中，`*` 是通配符，而且匹配模式不区分大小写：`delete("Cache:*")` 也会删除 `cache:1`。`mget()` 的键不能包含 `,`。在 `user` 模式下，键值存储需要管理员权限。
 
 ## 实体类型、模式与迁移
 

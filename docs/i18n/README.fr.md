@@ -239,7 +239,9 @@ await books.count({ filter: { year: { lt: 1970 } } });  // matching documents
 
 ## Noms, identifiants et clés
 
-Les noms d'entités, les identifiants de documents, les clés, les noms d'utilisateurs et les identifiants de hooks figurent dans le chemin des URL, et ElysianDB 0.2.3 ne les décode pas de façon cohérente : une valeur qui doit être encodée en pourcent-encodage pourrait être écrite sans pouvoir être relue. Le client n'accepte que les valeurs composées de lettres (`A-Z`, `a-z`), de chiffres et de `- _ . ! ~ * ' ( ) : @ $ & + , ; =`, et lève une `TypeError` pour tout le reste : espaces, lettres accentuées, `/`, `?`, `#` ou `%`. `create()` et `createMany()` vérifient de la même façon l'`id` que vous passez, pour que chaque document puisse être relu.
+Les noms d'entités, les identifiants de documents, les clés, les noms d'utilisateurs et les identifiants de hooks figurent dans le chemin des URL, et ElysianDB 0.2.3 ne les décode pas de façon cohérente : une clé ou un identifiant qui doit être encodé en pourcent-encodage pourrait être écrit sans pouvoir être relu. Le client n'accepte que les valeurs composées de lettres (`A-Z`, `a-z`), de chiffres et de `- _ . ! ~ * ' ( ) : @ $ & + , ; =`, et lève une `TypeError` pour tout le reste : espaces, lettres accentuées, `/`, `?`, `#` ou `%`. `create()` et `createMany()` vérifient de la même façon l'`id` que vous passez, pour que chaque document puisse être relu.
+
+Les noms d'entités sont plus stricts : lettres, chiffres, `_`, `-` et `.`, sans `.` au début. ElysianDB construit ses clés de stockage et ses motifs à partir de ces noms, si bien que `:` ou `*` atteindraient d'autres entités : `db.entity("books:id").deleteAll()` supprimerait tous les livres. Les types d'entités créés avec d'autres noms, par un autre client, restent accessibles avec `db.request()` et `encodeURIComponent()`.
 
 Certaines valeurs sont refusées parce qu'ElysianDB les route ailleurs, ou parce que `fetch` les retire des URL :
 
@@ -249,6 +251,9 @@ Certaines valeurs sont refusées parce qu'ElysianDB les route ailleurs, ou parce
 | `query`, `export`, `import`, `backup`, `restore`, `tx`, `entity`, `hook`, `acl`, `security` | Nom d'entité | `/api/query` est l'API Query, `/api/export` l'export, et ainsi de suite. |
 | `count`, `schema` | Identifiant de document dans `get()`, `update()` et `create()` | `GET /api/books/count` compte les livres. `exists()` et `delete()` les acceptent quand même. |
 | `mget` | Clé dans `kv.get()` et `kv.set()` | `GET /kv/mget` est la route de `mget()`. |
+| Clés avec `*` | Clé dans `kv.get()` et `kv.set()` | `*` est le joker de `mget()` et `delete()`. |
+
+ElysianDB 0.2.3 compare aussi certaines clés de stockage sans tenir compte de la casse : n'utilisez pas de noms d'entités qui ne diffèrent que par la casse, car `deleteAll()` sur `Books` supprime les index de `books`.
 
 Le client ne suit pas non plus les redirections HTTP, car une redirection rejouerait la requête, identifiants compris, sur une autre URL. Une redirection échoue avec une `ElysianDBError` qui indique la nouvelle adresse : si cela vous arrive, vérifiez l'URL du serveur.
 
@@ -395,7 +400,7 @@ await db.kv.mget(["greeting", "session:*"]); // { greeting: "hello", "session:42
 await db.kv.delete("session:*");             // `*` deletes every matching key
 ```
 
-Les valeurs sont des chaînes. Les clés suivent les [règles des noms et identifiants](#noms-identifiants-et-clés) : `*` est un joker dans `mget()` et `delete()`, et les clés passées à `mget()` ne peuvent pas contenir `,`. `mget()` renvoie un objet sans prototype, pour que chaque clé, `__proto__` compris, soit une propriété propre. En mode `user`, le stockage clé–valeur exige un administrateur.
+Les valeurs sont des chaînes. Les clés suivent les [règles des noms et identifiants](#noms-identifiants-et-clés). `*` est un joker dans `mget()` et `delete()`, et les motifs ignorent la casse : `delete("Cache:*")` supprime aussi `cache:1`. Les clés passées à `mget()` ne peuvent pas contenir `,`. En mode `user`, le stockage clé–valeur exige un administrateur.
 
 ## Types d'entités, schémas et migrations
 

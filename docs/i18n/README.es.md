@@ -239,7 +239,9 @@ await books.count({ filter: { year: { lt: 1970 } } });  // matching documents
 
 ## Nombres, IDs y claves
 
-Los nombres de entidad, los IDs de documento, las claves, los nombres de usuario y los IDs de hook van en las rutas de las URL, y ElysianDB 0.2.3 no los decodifica de forma coherente: un valor que necesite codificación porcentual podría escribirse sin poder volver a leerse. El cliente solo acepta valores formados por letras (`A-Z`, `a-z`), dígitos y `- _ . ! ~ * ' ( ) : @ $ & + , ; =`, y lanza un `TypeError` con cualquier otra cosa, como espacios, letras acentuadas, `/`, `?`, `#` o `%`. `create()` y `createMany()` comprueban del mismo modo el `id` que pasas, para que todos los documentos se puedan volver a leer.
+Los nombres de entidad, los IDs de documento, las claves, los nombres de usuario y los IDs de hook van en las rutas de las URL, y ElysianDB 0.2.3 no los decodifica de forma coherente: una clave o un ID que necesite codificación porcentual podría escribirse sin poder volver a leerse. El cliente solo acepta valores formados por letras (`A-Z`, `a-z`), dígitos y `- _ . ! ~ * ' ( ) : @ $ & + , ; =`, y lanza un `TypeError` con cualquier otra cosa, como espacios, letras acentuadas, `/`, `?`, `#` o `%`. `create()` y `createMany()` comprueban del mismo modo el `id` que pasas, para que todos los documentos se puedan volver a leer.
+
+Los nombres de entidad son más estrictos: letras, dígitos, `_`, `-` y `.`, sin un `.` al principio. ElysianDB construye a partir de ellos sus claves de almacenamiento y sus patrones, así que `:` o `*` alcanzarían otras entidades: `db.entity("books:id").deleteAll()` borraría todos los libros. Los tipos de entidad creados con otros nombres, por otro cliente, siguen siendo accesibles con `db.request()` y `encodeURIComponent()`.
 
 Algunos valores se rechazan porque ElysianDB los enruta a otro sitio, o porque `fetch` los elimina de las URL:
 
@@ -249,6 +251,9 @@ Algunos valores se rechazan porque ElysianDB los enruta a otro sitio, o porque `
 | `query`, `export`, `import`, `backup`, `restore`, `tx`, `entity`, `hook`, `acl`, `security` | Nombre de entidad | `/api/query` es la Query API, `/api/export` la exportación, y así sucesivamente. |
 | `count`, `schema` | ID de documento en `get()`, `update()` y `create()` | `GET /api/books/count` cuenta los libros. `exists()` y `delete()` sí los aceptan. |
 | `mget` | Clave en `kv.get()` y `kv.set()` | `GET /kv/mget` es la ruta de `mget()`. |
+| Claves con `*` | Clave en `kv.get()` y `kv.set()` | `*` es el comodín de `mget()` y `delete()`. |
+
+ElysianDB 0.2.3 también compara algunas claves de almacenamiento sin distinguir mayúsculas de minúsculas: no uses nombres de entidad que solo se diferencien en mayúsculas y minúsculas, ya que `deleteAll()` sobre `Books` borra los índices de `books`.
 
 El cliente tampoco sigue nunca las redirecciones HTTP, ya que una redirección repetiría la petición, credenciales incluidas, contra otra URL. Una redirección falla con un `ElysianDBError` que indica la nueva ubicación: si te ocurre, revisa la URL del servidor.
 
@@ -395,7 +400,7 @@ await db.kv.mget(["greeting", "session:*"]); // { greeting: "hello", "session:42
 await db.kv.delete("session:*");             // `*` deletes every matching key
 ```
 
-Los valores son cadenas. Las claves siguen las [reglas de nombres e IDs](#nombres-ids-y-claves): `*` es un comodín en `mget()` y `delete()`, y las claves de `mget()` no pueden contener `,`. `mget()` devuelve un objeto sin prototipo, para que todas las claves, incluida `__proto__`, sean propiedades propias. En modo `user`, el almacén clave–valor requiere un admin.
+Los valores son cadenas. Las claves siguen las [reglas de nombres e IDs](#nombres-ids-y-claves). `*` es un comodín en `mget()` y `delete()`, y los patrones no distinguen mayúsculas de minúsculas: `delete("Cache:*")` también borra `cache:1`. Las claves de `mget()` no pueden contener `,`. En modo `user`, el almacén clave–valor requiere un admin.
 
 ## Tipos de entidad, esquemas y migraciones
 

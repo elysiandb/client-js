@@ -239,7 +239,9 @@ await books.count({ filter: { year: { lt: 1970 } } });  // matching documents
 
 ## Namen, IDs und Schlüssel
 
-Entitätsnamen, Dokument-IDs, Schlüssel, Benutzernamen und Hook-IDs landen im URL-Pfad, und ElysianDB 0.2.3 dekodiert sie nicht einheitlich: Ein Wert, der Percent-Encoding braucht, ließe sich zwar schreiben, aber nicht wieder lesen. Der Client akzeptiert daher nur Werte aus Buchstaben (`A-Z`, `a-z`), Ziffern und `- _ . ! ~ * ' ( ) : @ $ & + , ; =` und wirft bei allem anderen einen `TypeError`, etwa bei Leerzeichen, Umlauten oder Buchstaben mit Akzent, `/`, `?`, `#` oder `%`. `create()` und `createMany()` prüfen eine übergebene `id` auf dieselbe Weise, damit sich jedes Dokument wieder lesen lässt.
+Entitätsnamen, Dokument-IDs, Schlüssel, Benutzernamen und Hook-IDs landen im URL-Pfad, und ElysianDB 0.2.3 dekodiert sie nicht einheitlich: Ein Schlüssel oder eine ID, die Percent-Encoding braucht, ließe sich zwar schreiben, aber nicht wieder lesen. Der Client akzeptiert daher nur Werte aus Buchstaben (`A-Z`, `a-z`), Ziffern und `- _ . ! ~ * ' ( ) : @ $ & + , ; =` und wirft bei allem anderen einen `TypeError`, etwa bei Leerzeichen, Umlauten oder Buchstaben mit Akzent, `/`, `?`, `#` oder `%`. `create()` und `createMany()` prüfen eine übergebene `id` auf dieselbe Weise, damit sich jedes Dokument wieder lesen lässt.
+
+Für Entitätsnamen gelten strengere Regeln: Buchstaben, Ziffern, `_`, `-` und `.`, ohne `.` am Anfang. ElysianDB bildet daraus seine Speicherschlüssel und Muster, sodass `:` oder `*` andere Entitäten erreichen würden: `db.entity("books:id").deleteAll()` würde alle Bücher löschen. Entitätstypen, die ein anderer Client mit anderen Namen angelegt hat, bleiben über `db.request()` und `encodeURIComponent()` erreichbar.
 
 Manche Werte werden abgelehnt, weil ElysianDB sie an andere Routen weiterleitet oder weil `fetch` sie aus URLs entfernt:
 
@@ -249,6 +251,9 @@ Manche Werte werden abgelehnt, weil ElysianDB sie an andere Routen weiterleitet 
 | `query`, `export`, `import`, `backup`, `restore`, `tx`, `entity`, `hook`, `acl`, `security` | Entitätsname | `/api/query` ist die Query API, `/api/export` der Export usw. |
 | `count`, `schema` | Dokument-ID in `get()`, `update()` und `create()` | `GET /api/books/count` zählt die Bücher. `exists()` und `delete()` akzeptieren sie weiterhin. |
 | `mget` | Schlüssel in `kv.get()` und `kv.set()` | `GET /kv/mget` ist die Route von `mget()`. |
+| Schlüssel mit `*` | Schlüssel in `kv.get()` und `kv.set()` | `*` ist der Platzhalter von `mget()` und `delete()`. |
+
+ElysianDB 0.2.3 vergleicht manche Speicherschlüssel außerdem ohne Beachtung der Groß- und Kleinschreibung: Verwende keine Entitätsnamen, die sich nur in der Groß- und Kleinschreibung unterscheiden, denn `deleteAll()` auf `Books` verwirft die Indizes von `books`.
 
 Außerdem folgt der Client nie HTTP-Weiterleitungen, da eine Weiterleitung die Anfrage samt Zugangsdaten an eine andere URL erneut senden würde. Eine Weiterleitung schlägt mit einem `ElysianDBError` fehl, der das neue Ziel angibt: Prüfe in diesem Fall die URL des Servers.
 
@@ -395,7 +400,7 @@ await db.kv.mget(["greeting", "session:*"]); // { greeting: "hello", "session:42
 await db.kv.delete("session:*");             // `*` deletes every matching key
 ```
 
-Werte sind Strings. Für Schlüssel gelten die [Regeln für Namen und IDs](#namen-ids-und-schlüssel): `*` ist in `mget()` und `delete()` ein Platzhalter, und Schlüssel für `mget()` dürfen kein `,` enthalten. `mget()` gibt ein Objekt ohne Prototyp zurück, sodass jeder Schlüssel, auch `__proto__`, eine eigene Property ist. Im `user`-Modus erfordert der Schlüssel–Wert-Speicher einen Admin.
+Werte sind Strings. Für Schlüssel gelten die [Regeln für Namen und IDs](#namen-ids-und-schlüssel). `*` ist in `mget()` und `delete()` ein Platzhalter, und Muster ignorieren die Groß- und Kleinschreibung: `delete("Cache:*")` löscht auch `cache:1`. Schlüssel für `mget()` dürfen kein `,` enthalten. Im `user`-Modus erfordert der Schlüssel–Wert-Speicher einen Admin.
 
 ## Entitätstypen, Schemas und Migrationen
 
