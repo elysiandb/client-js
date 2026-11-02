@@ -21,7 +21,7 @@
   ],
   "sideEffects": false,
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "build": "npm run clean && tsc -p tsconfig.json && tsc -p tsconfig.esm.json && node scripts/postbuild.mjs",
@@ -58,7 +58,6 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "ts-node": "^10.9.2",
     "typescript": "^5.6.0"
   }
 }

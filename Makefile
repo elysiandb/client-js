@@ -4,8 +4,6 @@
 
 PACKAGE_NAME=@elysiandbjs/client
 
-NPM_USER := $(shell npm whoami 2>/dev/null)
-
 # ----------- COMMANDS ------------------------------------
 
 build:
@@ -20,16 +18,12 @@ test:
 test-integration:
 	npm run test:integration:local
 
-login:
-	@if [ -z "$(NPM_USER)" ]; then \
-		echo "You are not logged in to npm. Logging in..."; \
-		npm login; \
-	else \
-		echo "Already logged in as: $(NPM_USER)"; \
-	fi
+# Bumps the version (VERSION=patch, minor, major or x.y.z) and pushes the tag:
+# the Release workflow then publishes the package to npm with provenance.
+VERSION ?= patch
 
-publish: build login
-	npm version patch
-	npm run build
-	npm publish --access public
+release:
+	@test -z "$$(git status --porcelain)" || { echo "The working tree is not clean"; exit 1; }
+	@test "$$(git rev-parse --abbrev-ref HEAD)" = main || { echo "Releases are made from main"; exit 1; }
+	npm version $(VERSION)
 	git push --follow-tags
