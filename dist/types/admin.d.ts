@@ -96,7 +96,12 @@ export interface ImportResult {
 export interface Backup {
     /** The `tar.gz` archive. */
     data: Uint8Array;
-    /** File name suggested by ElysianDB, such as `elysiandb-backup-20261101T091400Z.tar.gz`. */
+    /**
+     * File name suggested by ElysianDB, such as `elysiandb-backup-20261101T091400Z.tar.gz`. It is always a
+     * `.tar.gz` file name made of letters, digits, `.`, `_` and `-`, without folder, so that a server cannot
+     * point it outside your folder or at a file that is not an archive: `elysiandb-backup.tar.gz` replaces
+     * any other name.
+     */
     filename: string;
 }
 export interface RestoreResult {

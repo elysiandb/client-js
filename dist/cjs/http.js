@@ -5,6 +5,7 @@ exports.segment = segment;
 const errors_js_1 = require("./errors.js");
 const IDEMPOTENT_METHODS = new Set(["GET", "HEAD", "PUT", "DELETE"]);
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_RETRY_DELAY_MS = 30000;
 const STATUS_HINTS = {
     400: "bad request",
@@ -28,7 +29,7 @@ class HttpClient {
         return response.data;
     }
     async send(method, path, options = {}) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q;
         const url = this.buildUrl(path, options.query);
         const retries = Math.max(0, (_b = (_a = options.retries) !== null && _a !== void 0 ? _a : this.options.retries) !== null && _b !== void 0 ? _b : 0);
         const canRetry = IDEMPOTENT_METHODS.has(method);
@@ -58,7 +59,9 @@ class HttpClient {
             if ((_g = options.signal) === null || _g === void 0 ? void 0 : _g.aborted)
                 controller.abort();
             (_h = options.signal) === null || _h === void 0 ? void 0 : _h.addEventListener("abort", onCallerAbort);
-            const init = { method, headers, body, signal: controller.signal };
+            // ElysianDB never redirects on purpose. Following a redirect would replay the request, credentials
+            // included, on another URL: `DELETE /api/books/` is redirected to `DELETE /api/books`, for example.
+            const init = { method, headers, body, signal: controller.signal, redirect: "manual" };
             if (this.options.credentials)
                 init.credentials = this.options.credentials;
             const started = Date.now();
@@ -112,6 +115,19 @@ class HttpClient {
             if (response.ok) {
                 return { data: payload, status: response.status, headers: response.headers };
             }
+            // Browsers hide the status and the location of a redirect ("opaqueredirect").
+            if (response.type === "opaqueredirect" || REDIRECT_STATUSES.has(response.status)) {
+                const location = response.headers.get("Location");
+                throw new errors_js_1.ElysianDBError({
+                    code: "HTTP_ERROR",
+                    message: `${method} ${path} was redirected${response.status ? ` (${response.status})` : ""}${location ? ` to ${location}` : ""}: the client does not follow redirects, check the URL of the server`,
+                    method,
+                    url,
+                    status: response.status,
+                    data: payload,
+                    requestId: (_o = response.headers.get("X-Request-Id")) !== null && _o !== void 0 ? _o : undefined,
+                });
+            }
             const retryAfter = parseRetryAfter(response.headers.get("Retry-After"));
             if (canRetry && attempt < retries && RETRYABLE_STATUSES.has(response.status)) {
                 const delay = retryAfter !== undefined ? retryAfter * 1000 : this.backoff(attempt);
@@ -120,7 +136,7 @@ class HttpClient {
                     continue;
                 }
             }
-            const detail = (_o = (0, errors_js_1.describeErrorBody)(payload)) !== null && _o !== void 0 ? _o : STATUS_HINTS[response.status];
+            const detail = (_p = (0, errors_js_1.describeErrorBody)(payload)) !== null && _p !== void 0 ? _p : STATUS_HINTS[response.status];
             throw new errors_js_1.ElysianDBError({
                 code: "HTTP_ERROR",
                 message: `${method} ${path} failed with status ${response.status}${detail ? `: ${detail}` : ""}`,
@@ -128,7 +144,7 @@ class HttpClient {
                 url,
                 status: response.status,
                 data: payload,
-                requestId: (_p = response.headers.get("X-Request-Id")) !== null && _p !== void 0 ? _p : undefined,
+                requestId: (_q = response.headers.get("X-Request-Id")) !== null && _q !== void 0 ? _q : undefined,
                 retryAfter,
             });
         }
@@ -198,10 +214,28 @@ function parseRetryAfter(value) {
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
+/** Characters of a path segment that ElysianDB 0.2.3 reads back as they were written. */
+const PATH_SEGMENT = /^[A-Za-z0-9\-_.!~*'():@$&+,;=]+$/;
+/** Punctuation of `PATH_SEGMENT`, for error messages. */
+const PATH_SEGMENT_PUNCTUATION = "- _ . ! ~ * ' ( ) : @ $ & + , ; =";
 /**
- * Encodes one path segment (entity name, ID, key...). Characters allowed in a path (`:`, `@`, `*`, `,`...)
- * are kept as they are, since ElysianDB stores path segments without decoding them.
+ * Checks one path segment (entity name, ID, key...) and returns it unchanged.
+ *
+ * - `.` and `..` are rejected: `fetch` removes them from URLs, so `DELETE /api/books/.` would become
+ *   `DELETE /api/books/`, which deletes the whole entity.
+ * - Characters that need percent-encoding are rejected: ElysianDB 0.2.3 decodes some path parameters and not
+ *   others, so the value could be written but not read back (`PUT /kv/a%20b` stores the key `a%20b`).
  */
-function segment(value) {
-    return encodeURIComponent(value).replace(/%(3A|40|24|26|2B|2C|3B|3D)/gi, (escaped) => decodeURIComponent(escaped));
+function segment(value, label) {
+    if (typeof value !== "string" || value === "") {
+        throw new TypeError(`ElysianDB: invalid ${label} ${JSON.stringify(value)}: it must be a non-empty string`);
+    }
+    if (value === "." || value === "..") {
+        throw new TypeError(`ElysianDB: invalid ${label} "${value}": fetch removes "." and ".." from URL paths`);
+    }
+    if (!PATH_SEGMENT.test(value)) {
+        throw new TypeError(`ElysianDB: invalid ${label} ${JSON.stringify(value)}: ElysianDB 0.2.3 only reads back path segments ` +
+            `made of letters, digits and ${PATH_SEGMENT_PUNCTUATION}`);
+    }
+    return value;
 }

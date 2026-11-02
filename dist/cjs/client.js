@@ -59,7 +59,7 @@ class ElysianDB {
      * await db.query<Book>({ entity: "books", filter: { year: { gte: 2000 } }, sort: { year: "desc" } });
      * ```
      */
-    query(request, options) {
+    async query(request, options) {
         return this.http.request("POST", "/api/query", { ...options, body: (0, query_js_1.toQueryPayload)(request) });
     }
     /**

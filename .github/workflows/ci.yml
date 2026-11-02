@@ -4,9 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
-env:
-  ELYSIANDB_VERSION: v0.2.3
+permissions:
+  contents: read
 
 jobs:
   unit:
@@ -14,29 +15,41 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node: [18, 20, 22, 24]
+        node: [20, 22, 24]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node }}
       - run: npm ci
       - run: npm run build
       - run: npm run typecheck
       - run: npm test
+      - name: Check that dist/ matches the sources
+        run: git diff --exit-code -- dist
 
   integration:
-    name: Integration tests (ElysianDB ${{ env.ELYSIANDB_VERSION }})
+    name: Integration tests (ElysianDB ${{ matrix.elysiandb }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        elysiandb: [v0.2.3]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.24"
+          cache: false
       - name: Build ElysianDB
+        env:
+          ELYSIANDB_VERSION: ${{ matrix.elysiandb }}
         run: |
           git clone --depth 1 --branch "$ELYSIANDB_VERSION" https://github.com/elysiandb/elysiandb.git "$RUNNER_TEMP/elysiandb"
           cd "$RUNNER_TEMP/elysiandb"

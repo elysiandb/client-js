@@ -105,10 +105,25 @@ function conditionOf(value: unknown): Record<string, unknown> {
     return isPlainObject(value) ? value : { eq: value };
 }
 
+/**
+ * Checks `limit` and `offset`. ElysianDB reads them as unsigned integers and ignores anything else,
+ * so `limit: 0` or `limit: 1.5` would return every document.
+ */
+function checkPagination(options: { limit?: number; offset?: number }): void {
+    const { limit, offset } = options;
+    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) {
+        throw new TypeError(`ElysianDB: limit must be a positive integer, got ${limit}`);
+    }
+    if (offset !== undefined && (!Number.isSafeInteger(offset) || offset < 0)) {
+        throw new TypeError(`ElysianDB: offset must be a non-negative integer, got ${offset}`);
+    }
+}
+
 /** Builds the query string of `GET /api/<entity>` (without the leading `?`). */
 export function toSearchParams(options: ListOptions & { countOnly?: boolean } = {}): URLSearchParams {
     const params = new URLSearchParams();
 
+    checkPagination(options);
     if (options.limit !== undefined) params.set("limit", String(options.limit));
     if (options.offset !== undefined) params.set("offset", String(options.offset));
     if (options.search !== undefined && options.search !== "") params.set("search", options.search);
@@ -181,6 +196,7 @@ export function toQueryFilter(filter: QueryFilter): Record<string, unknown> {
 
 export function toQueryPayload(request: QueryRequest, countOnly = false): QueryPayload {
     const payload: QueryPayload = { entity: request.entity };
+    checkPagination(request);
 
     if (request.filter) payload.filters = toQueryFilter(request.filter);
     if (countOnly) {

@@ -60,7 +60,11 @@ export declare class HttpClient {
     private backoff;
 }
 /**
- * Encodes one path segment (entity name, ID, key...). Characters allowed in a path (`:`, `@`, `*`, `,`...)
- * are kept as they are, since ElysianDB stores path segments without decoding them.
+ * Checks one path segment (entity name, ID, key...) and returns it unchanged.
+ *
+ * - `.` and `..` are rejected: `fetch` removes them from URLs, so `DELETE /api/books/.` would become
+ *   `DELETE /api/books/`, which deletes the whole entity.
+ * - Characters that need percent-encoding are rejected: ElysianDB 0.2.3 decodes some path parameters and not
+ *   others, so the value could be written but not read back (`PUT /kv/a%20b` stores the key `a%20b`).
  */
-export declare function segment(value: string): string;
+export declare function segment(value: string, label: string): string;

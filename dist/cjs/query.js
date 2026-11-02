@@ -19,10 +19,24 @@ function formatValue(value) {
 function conditionOf(value) {
     return isPlainObject(value) ? value : { eq: value };
 }
+/**
+ * Checks `limit` and `offset`. ElysianDB reads them as unsigned integers and ignores anything else,
+ * so `limit: 0` or `limit: 1.5` would return every document.
+ */
+function checkPagination(options) {
+    const { limit, offset } = options;
+    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) {
+        throw new TypeError(`ElysianDB: limit must be a positive integer, got ${limit}`);
+    }
+    if (offset !== undefined && (!Number.isSafeInteger(offset) || offset < 0)) {
+        throw new TypeError(`ElysianDB: offset must be a non-negative integer, got ${offset}`);
+    }
+}
 /** Builds the query string of `GET /api/<entity>` (without the leading `?`). */
 function toSearchParams(options = {}) {
     var _a, _b;
     const params = new URLSearchParams();
+    checkPagination(options);
     if (options.limit !== undefined)
         params.set("limit", String(options.limit));
     if (options.offset !== undefined)
@@ -95,6 +109,7 @@ function toQueryFilter(filter) {
 function toQueryPayload(request, countOnly = false) {
     var _a;
     const payload = { entity: request.entity };
+    checkPagination(request);
     if (request.filter)
         payload.filters = toQueryFilter(request.filter);
     if (countOnly) {

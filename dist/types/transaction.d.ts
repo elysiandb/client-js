@@ -34,7 +34,11 @@ export declare class Transaction {
     write<T extends {
         id: string;
     } = Document>(entity: string, data: CreateInput<T>): Promise<T>;
-    /** Queues a partial update. The commit fails if the document does not exist at that point. */
+    /**
+     * Queues a partial update. The document must already be stored: ElysianDB 0.2.3 rejects the update
+     * of a document created in the same transaction (`400`). The commit fails if the document no longer
+     * exists at that point.
+     */
     update<T extends {
         id: string;
     } = Document>(entity: string, id: string, data: UpdateInput<T>, call?: CallOptions): Promise<void>;
@@ -52,6 +56,7 @@ export declare class Transaction {
     /** Discards every queued operation. Does nothing when the transaction is already finished. */
     rollback(call?: CallOptions): Promise<void>;
     private path;
+    private documentPath;
     private ensureActive;
 }
 /** Alias kept for compatibility with 0.0.x. */

@@ -130,7 +130,7 @@ export class ElysianDB {
      * await db.query<Book>({ entity: "books", filter: { year: { gte: 2000 } }, sort: { year: "desc" } });
      * ```
      */
-    query<T extends { id: string } = Document>(request: QueryRequest, options?: RequestOptions): Promise<T[]> {
+    async query<T extends { id: string } = Document>(request: QueryRequest, options?: RequestOptions): Promise<T[]> {
         return this.http.request<T[]>("POST", "/api/query", { ...options, body: toQueryPayload(request) });
     }
 

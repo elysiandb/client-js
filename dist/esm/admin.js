@@ -1,3 +1,4 @@
+import { entitySegment } from "./entity.js";
 import { segment } from "./http.js";
 /** Entity types and their schemas (`db.entities`). */
 export class EntitiesClient {
@@ -24,8 +25,8 @@ export class EntitiesClient {
      * await db.entities.create("books", { title: { type: "string", required: true }, pages: "number" });
      * ```
      */
-    create(name, fields, call) {
-        return this.http.request("POST", `/api/${segment(name)}/create`, { ...call, body: { fields } });
+    async create(name, fields, call) {
+        return this.http.request("POST", `/api/${entitySegment(name)}/create`, { ...call, body: { fields } });
     }
 }
 /** User accounts (`db.users`). The routes exist in `user` mode only and require an admin session. */
@@ -38,11 +39,13 @@ export class UsersClient {
         const result = await this.http.request("GET", "/api/security/user", call);
         return (_a = result.users) !== null && _a !== void 0 ? _a : [];
     }
-    get(username, call) {
+    async get(username, call) {
         return this.http.request("GET", this.userPath(username), call);
     }
     /** Creates a user (`role` defaults to `user`). Fails with `409` when the username exists. */
     async create(user, call) {
+        // A username that cannot be used in a URL path could be created but not managed afterwards.
+        segment(user === null || user === void 0 ? void 0 : user.username, "username");
         await this.http.request("POST", "/api/security/user", { ...call, body: user });
     }
     /** Deletes a user. The default `admin` user and the last admin cannot be deleted. */
@@ -58,7 +61,7 @@ export class UsersClient {
         await this.http.request("PUT", `${this.userPath(username)}/role`, { ...call, body: { role } });
     }
     userPath(username) {
-        return `/api/security/user/${segment(username)}`;
+        return `/api/security/user/${segment(username, "username")}`;
     }
 }
 /** Access control lists (`db.acl`). The routes exist in `user` mode only and require an admin session. */
@@ -67,12 +70,12 @@ export class ACLClient {
         this.http = http;
     }
     /** The ACL of a user on an entity type. */
-    get(username, entity, call) {
+    async get(username, entity, call) {
         return this.http.request("GET", this.aclPath(username, entity), call);
     }
     /** The ACLs of a user on every entity type. */
     async list(username, call) {
-        const result = await this.http.request("GET", `/api/acl/${segment(username)}`, call);
+        const result = await this.http.request("GET", `/api/acl/${segment(username, "username")}`, call);
         return result !== null && result !== void 0 ? result : [];
     }
     /** Replaces the permissions of a user on an entity type. Permissions left out are revoked. */
@@ -91,7 +94,7 @@ export class ACLClient {
         await this.http.request("PUT", `${this.aclPath(username, entity)}/default`, call);
     }
     aclPath(username, entity) {
-        return `/api/acl/${segment(username)}/${segment(entity)}`;
+        return `/api/acl/${segment(username, "username")}/${entitySegment(entity)}`;
     }
 }
 /** JavaScript hooks run on reads (`db.hooks`). Requires `api.hooks.enabled` and admin credentials. */
@@ -101,11 +104,11 @@ export class HooksClient {
     }
     /** Hooks of an entity type. */
     async list(entity, call) {
-        const result = await this.http.request("GET", `/api/hook/${segment(entity)}`, call);
+        const result = await this.http.request("GET", `/api/hook/${entitySegment(entity)}`, call);
         return result !== null && result !== void 0 ? result : [];
     }
-    get(id, call) {
-        return this.http.request("GET", `/api/hook/id/${segment(id)}`, call);
+    async get(id, call) {
+        return this.http.request("GET", `/api/hook/id/${segment(id, "hook ID")}`, call);
     }
     /**
      * Creates a hook on an entity type.
@@ -118,17 +121,24 @@ export class HooksClient {
      * });
      * ```
      */
-    create(entity, hook, call) {
+    async create(entity, hook, call) {
         const body = { language: "javascript", priority: 0, enabled: true, bypass_acl: false, ...hook };
-        return this.http.request("POST", `/api/hook/${segment(entity)}`, { ...call, body });
+        return this.http.request("POST", `/api/hook/${entitySegment(entity)}`, { ...call, body });
     }
     /** Updates some fields of a hook and returns the full hook. */
-    update(id, hook, call) {
-        return this.http.request("PUT", `/api/hook/id/${segment(id)}`, { ...call, body: hook });
+    async update(id, hook, call) {
+        return this.http.request("PUT", `/api/hook/id/${segment(id, "hook ID")}`, { ...call, body: hook });
     }
     async delete(entity, id, call) {
-        await this.http.request("DELETE", `/api/hook/${segment(entity)}/${segment(id)}`, call);
+        await this.http.request("DELETE", `/api/hook/${entitySegment(entity)}/${segment(id, "hook ID")}`, call);
     }
+}
+const DEFAULT_BACKUP_FILENAME = "elysiandb-backup.tar.gz";
+/** The base name of the file of a `Content-Disposition` header, if it is a plain `.tar.gz` file name. */
+function backupFilename(disposition) {
+    const match = /filename="?([^";]+)"?/i.exec(disposition !== null && disposition !== void 0 ? disposition : "");
+    const name = match ? match[1].trim().split(/[\\/]/).pop() : "";
+    return /^[A-Za-z0-9][A-Za-z0-9._-]{0,200}\.tar\.gz$/.test(name) ? name : DEFAULT_BACKUP_FILENAME;
 }
 /**
  * Instance-wide operations (`db.admin`): persistence, configuration, export/import and backups.
@@ -181,11 +191,8 @@ export class AdminClient {
      * ```
      */
     async backup(call) {
-        var _a;
         const response = await this.http.send("GET", "/api/backup", { ...call, responseType: "bytes" });
-        const disposition = (_a = response.headers.get("Content-Disposition")) !== null && _a !== void 0 ? _a : "";
-        const match = /filename="?([^";]+)"?/.exec(disposition);
-        return { data: response.data, filename: match ? match[1] : "elysiandb-backup.tar.gz" };
+        return { data: response.data, filename: backupFilename(response.headers.get("Content-Disposition")) };
     }
     /**
      * Replaces all the data with a backup archive. Every session ends, including the current one.

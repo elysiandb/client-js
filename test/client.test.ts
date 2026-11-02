@@ -4,6 +4,13 @@ import { and, createClient, ElysianDB, ElysianDBError, or, toQueryString } from 
 import { toQueryFilter } from "../src/query.js";
 import { client, empty, json, mockFetch, text } from "./helpers.js";
 
+/** Waits until `condition` holds, for work that a method starts without awaiting it. */
+async function until(condition: () => boolean): Promise<void> {
+    const deadline = Date.now() + 2000;
+    while (!condition() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.ok(condition(), "condition not met in time");
+}
+
 interface Book {
     id: string;
     title: string;
@@ -133,11 +140,138 @@ describe("entity routes", () => {
         assert.equal(toQueryString({ limit: 1, includes: "all" }), "?limit=1&includes=all");
     });
 
-    it("encodes entity names and IDs", async () => {
-        const { db, calls } = client([json({ id: "a/b" })]);
-        await db.entity("my books").get("a/b", { fields: ["title"] });
-        assert.equal(calls[0].url.pathname, "/api/my%20books/a%2Fb");
+    it("keeps the punctuation that ElysianDB reads back in paths", async () => {
+        const { db, calls } = client([json({ id: "x" }), json({ id: "x" })]);
+        await db.entity("my-books_v2.0").get("a:b@c$d&e+f,g;h=i!j~k*l'm(n)o", { fields: ["title"] });
+        await db.entity("books").get("..a.b..");
+        assert.equal(calls[0].url.pathname, "/api/my-books_v2.0/a:b@c$d&e+f,g;h=i!j~k*l'm(n)o");
         assert.equal(calls[0].url.searchParams.get("fields"), "title");
+        assert.equal(calls[1].url.pathname, "/api/books/..a.b..");
+    });
+
+    it("rejects . and .., which fetch removes from URLs", async () => {
+        const { db, calls } = client([]);
+        const books = db.entity("books");
+        for (const id of [".", ".."]) {
+            await assert.rejects(books.delete(id), /invalid document ID "\.{1,2}": fetch removes/);
+            await assert.rejects(books.get(id), TypeError);
+            await assert.rejects(books.getOrNull(id), TypeError);
+            await assert.rejects(books.update(id, {}), TypeError);
+            await assert.rejects(books.exists(id), TypeError);
+            assert.throws(() => db.entity(id), /invalid entity name/);
+            await assert.rejects(db.kv.delete(id), /invalid key/);
+            await assert.rejects(db.kv.get(id), /invalid key/);
+            await assert.rejects(db.kv.set(id, "v"), /invalid key/);
+            await assert.rejects(db.users.get(id), /invalid username/);
+            await assert.rejects(db.users.delete(id), /invalid username/);
+            await assert.rejects(db.acl.get("bob", id), /invalid entity name/);
+            await assert.rejects(db.hooks.get(id), /invalid hook ID/);
+            await assert.rejects(db.hooks.delete("books", id), /invalid hook ID/);
+            await assert.rejects(db.entities.create(id, {}), /invalid entity name/);
+        }
+        assert.equal(calls.length, 0);
+    });
+
+    it("rejects empty and non-string path values, which would hit another route", async () => {
+        const { db, calls } = client([]);
+        await assert.rejects(db.users.get(""), /invalid username "": it must be a non-empty string/);
+        await assert.rejects(db.acl.list(""), /invalid username ""/);
+        await assert.rejects(db.hooks.update(undefined as unknown as string, {}), /invalid hook ID undefined/);
+        await assert.rejects(db.hooks.delete("books", 42 as unknown as string), /invalid hook ID 42/);
+        await assert.rejects(db.entity("books").get(""), /a document ID is required \(entity "books"\)/);
+        await assert.rejects(db.kv.get(""), /a key is required/);
+        assert.throws(() => db.entity(""), /an entity name is required/);
+        assert.equal(calls.length, 0);
+    });
+
+    it("rejects values that ElysianDB 0.2.3 cannot read back from a path", async () => {
+        const { db, calls } = client([]);
+        const books = db.entity("books");
+        for (const value of ["a b", "é", "a%20b", "a/b", "a?b", "a#b", "a\"b", "a\nb", "a<b", "a[b]"]) {
+            await assert.rejects(books.get(value), /only reads back path segments made of letters, digits and/);
+            await assert.rejects(books.delete(value), /invalid document ID/);
+            await assert.rejects(books.create({ id: value }), /invalid document ID/);
+            await assert.rejects(books.createMany([{ id: "ok" }, { id: value }]), /invalid document ID/);
+            await assert.rejects(db.kv.set(value, "v"), /invalid key/);
+            await assert.rejects(db.users.create({ username: value, password: "long-enough" }), /invalid username/);
+            await assert.rejects(db.users.changePassword(value, "long-enough"), /invalid username/);
+            await assert.rejects(db.hooks.list(value), /invalid entity name/);
+            assert.throws(() => db.entity(value), /invalid entity name/);
+        }
+        assert.equal(calls.length, 0);
+    });
+
+    it("rejects entity names that would reach the storage keys of other entities", async () => {
+        const { db, calls } = client([json({ transaction_id: "tx1" })]);
+        for (const name of ["books:id", "books*", "*", ":", "b@oks", "b+oks", "b$", ".hidden", "a,b", "a;b", "a=b", "(a)", "a!", "a~", "a'b"]) {
+            assert.throws(() => db.entity(name), /invalid entity name .*: use letters, digits, "_", "-" and "\."/, name);
+            await assert.rejects(db.entities.create(name, {}), /invalid entity name/);
+            await assert.rejects(db.hooks.list(name), /invalid entity name/);
+            await assert.rejects(db.hooks.delete(name, "h1"), /invalid entity name/);
+            await assert.rejects(db.acl.get("bob", name), /invalid entity name/);
+            await assert.rejects(db.acl.reset("bob", name), /invalid entity name/);
+        }
+        const tx = await db.beginTransaction();
+        await assert.rejects(tx.create("books:id", {}), /invalid entity name "books:id"/);
+        await assert.rejects(tx.update("books*", "1", {}), /invalid entity name "books\*"/);
+        assert.equal(calls.length, 1);
+
+        for (const name of ["books", "Books_2", "user-profiles", "v2.books", "_private", "-x", "a..b"]) {
+            assert.equal(db.entity(name).name, name);
+        }
+    });
+
+    it("rejects entity names that are routes of ElysianDB", async () => {
+        const { db, calls } = client([json({ transaction_id: "tx1" })]);
+        for (const name of ["query", "export", "import", "backup", "restore", "tx", "entity", "hook", "acl", "security"]) {
+            assert.throws(() => db.entity(name), new RegExp(`invalid entity name "${name}": /api/${name} is a route`));
+            await assert.rejects(db.entities.create(name, {}), /is a route of ElysianDB/);
+        }
+        const tx = await db.beginTransaction();
+        await assert.rejects(tx.create("query", {}), /invalid entity name "query"/);
+        await assert.rejects(tx.delete("export", "1"), /invalid entity name "export"/);
+        assert.equal(calls.length, 1);
+
+        // Names that only contain a reserved word are fine.
+        assert.equal(db.entity("queries").name, "queries");
+        assert.equal(db.entity("Query").name, "Query");
+    });
+
+    it("rejects the IDs count and schema where ElysianDB routes them elsewhere", async () => {
+        const { db, calls } = client([json({ exists: true }), empty(200), json([{ id: "count" }])]);
+        const books = db.entity("books");
+        for (const id of ["count", "schema"]) {
+            await assert.rejects(books.get(id), new RegExp(`invalid document ID "${id}": /api/<entity>/${id} is a route`));
+            await assert.rejects(books.getOrNull(id), TypeError);
+            await assert.rejects(books.update(id, {}), TypeError);
+            await assert.rejects(books.create({ id }), TypeError);
+            await assert.rejects(books.createMany([{ id }]), TypeError);
+        }
+        assert.equal(calls.length, 0);
+
+        // These routes do not collide: documents created elsewhere can still be checked and removed.
+        assert.equal(await books.exists("count"), true);
+        await books.delete("schema");
+        await books.updateMany([{ id: "count" }]);
+        assert.deepEqual(
+            calls.map((c) => `${c.method} ${c.url.pathname}`),
+            ["GET /api/books/count/exists", "DELETE /api/books/schema", "PUT /api/books"],
+        );
+    });
+
+    it("validates limit and offset", async () => {
+        const { db, calls } = client([]);
+        const books = db.entity("books");
+        for (const limit of [0, -1, 1.5, NaN, Infinity, "10" as unknown as number]) {
+            await assert.rejects(books.list({ limit }), /limit must be a positive integer/);
+            await assert.rejects(books.query({ limit }), /limit must be a positive integer/);
+        }
+        for (const offset of [-1, 0.5, NaN]) {
+            await assert.rejects(books.list({ offset }), /offset must be a non-negative integer/);
+            await assert.rejects(db.query({ entity: "books", offset }), /offset must be a non-negative integer/);
+        }
+        assert.equal(calls.length, 0);
+        assert.equal(toQueryString({ limit: 1, offset: 0 }), "?limit=1&offset=0");
     });
 
     it("sends JSON bodies for writes", async () => {
@@ -197,16 +331,41 @@ describe("entity routes", () => {
         assert.equal(await books.getOrNull("missing"), null);
     });
 
-    it("iterates page by page until a short page", async () => {
-        const { db, calls } = client([json([{ id: "1" }, { id: "2" }]), json([{ id: "3" }])]);
+    it("iterates page by page until a short page, checked with count()", async () => {
+        const { db, calls } = client([json([{ id: "1" }, { id: "2" }]), json([{ id: "3" }]), json({ count: 3 })]);
         const ids: string[] = [];
         for await (const book of db.entity("books").iterate({ pageSize: 2, sort: { id: "asc" } })) ids.push(book.id);
 
         assert.deepEqual(ids, ["1", "2", "3"]);
         assert.deepEqual(
-            calls.map((c) => c.url.searchParams.get("offset")),
-            ["0", "2"],
+            calls.map((c) => `${c.url.pathname}?${c.url.searchParams}`),
+            [
+                "/api/books?limit=2&offset=0&sort%5Bid%5D=asc",
+                "/api/books?limit=2&offset=2&sort%5Bid%5D=asc",
+                "/api/books/count?",
+            ],
         );
+    });
+
+    it("keeps iterating when ACLs make a page short before the end", async () => {
+        // In user mode, ElysianDB 0.2.3 applies an `owning_read` ACL after limit and offset.
+        const { db, calls } = client([json([]), json({ count: 2 }), json([{ id: "d4" }, { id: "d5" }])]);
+        const all = await db.entity("notes").listAll({ pageSize: 2, filter: { n: { gte: 0 } }, search: "x" });
+
+        assert.deepEqual(all.map((note) => note.id), ["d4", "d5"]);
+        assert.equal(calls[1].url.pathname, "/api/notes");
+        assert.equal(calls[1].url.searchParams.get("countOnly"), "true");
+        assert.equal(calls[1].url.searchParams.get("filter[n][gte]"), "0");
+        assert.equal(calls[1].url.searchParams.get("search"), "x");
+        assert.equal(calls[1].url.searchParams.get("limit"), null);
+        assert.equal(calls[2].url.searchParams.get("offset"), "2");
+        assert.equal(calls[2].url.searchParams.get("limit"), null, "the rest is fetched in one request");
+    });
+
+    it("stops on an empty first page when there is nothing to read", async () => {
+        const { db, calls } = client([json([]), json({ count: 0 })]);
+        assert.deepEqual(await db.entity("books").listAll(), []);
+        assert.equal(calls.length, 2);
     });
 
     it("manages schemas and migrations", async () => {
@@ -327,6 +486,47 @@ describe("errors", () => {
     });
 });
 
+describe("redirects", () => {
+    it("never follows redirects, which would replay the request elsewhere", async () => {
+        const { fetch, calls } = mockFetch(empty(308, { Location: "/api/books" }));
+        let redirect: RequestRedirect | undefined;
+        const db = createClient("http://db.test", {
+            fetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+                redirect = init?.redirect;
+                return fetch(input, init);
+            }) as typeof fetch,
+            retries: 3,
+            retryDelay: 1,
+            auth: { token: "secret" },
+        });
+
+        await assert.rejects(db.request("DELETE", "/api/books/"), (error: ElysianDBError) => {
+            assert.equal(error.code, "HTTP_ERROR");
+            assert.equal(error.status, 308);
+            assert.equal(
+                error.message,
+                "DELETE /api/books/ was redirected (308) to /api/books: the client does not follow redirects, check the URL of the server",
+            );
+            return true;
+        });
+        assert.equal(redirect, "manual");
+        assert.equal(calls.length, 1, "a redirect is never retried");
+    });
+
+    it("reports the opaque redirects of browsers", async () => {
+        const opaque = empty(200);
+        Object.defineProperty(opaque, "type", { value: "opaqueredirect" });
+        Object.defineProperty(opaque, "status", { value: 0 });
+        Object.defineProperty(opaque, "ok", { value: false });
+        const { db } = client([opaque]);
+        await assert.rejects(db.entity("books").list(), (error: ElysianDBError) => {
+            assert.equal(error.status, 0);
+            assert.match(error.message, /^GET \/api\/books was redirected: the client does not follow redirects/);
+            return true;
+        });
+    });
+});
+
 describe("retries", () => {
     it("retries idempotent requests on 503 and network errors", async () => {
         let attempts = 0;
@@ -430,6 +630,157 @@ describe("transactions", () => {
         assert.equal(calls[1].url.pathname, "/api/tx/tx2/rollback");
     });
 
+    it("never retries the operations of a transaction", async () => {
+        const { fetch, calls } = mockFetch(
+            json({ transaction_id: "tx4" }),
+            json({}, 503),
+            json({}, 503),
+            new Response(null, { status: 200 }),
+        );
+        const db = createClient("http://db.test", { fetch, retries: 3, retryDelay: 1 });
+        const tx = await db.beginTransaction();
+        await assert.rejects(tx.update("books", "b1", { year: 1 }), (error: ElysianDBError) => error.status === 503);
+        await assert.rejects(tx.delete("books", "b1"), (error: ElysianDBError) => error.status === 503);
+        assert.deepEqual(
+            calls.map((c) => `${c.method} ${c.url.pathname}`),
+            ["POST /api/tx/begin", "PUT /api/tx/tx4/entity/books/b1", "DELETE /api/tx/tx4/entity/books/b1"],
+        );
+    });
+
+    it("rolls back when a commit gets no answer, so that the transaction is not left open", async () => {
+        let attempt = 0;
+        const { fetch, calls } = mockFetch(
+            json({ transaction_id: "tx5" }),
+            () => {
+                attempt++;
+                throw new TypeError("socket hang up");
+            },
+            empty(200),
+        );
+        const db = createClient("http://db.test", { fetch, retries: 3, retryDelay: 1 });
+        const tx = await db.beginTransaction();
+        await assert.rejects(tx.commit({ requestId: "r1" }), (error: ElysianDBError) => error.code === "NETWORK_ERROR");
+        assert.equal(attempt, 1, "a commit is never retried");
+        assert.equal(tx.state, "committed");
+        await until(() => calls.length === 3);
+        assert.equal(calls[2].url.pathname, "/api/tx/tx5/rollback");
+        assert.equal(calls[2].headers["x-request-id"], "r1");
+    });
+
+    it("keeps the error of a commit when the rollback fails too", async () => {
+        const { fetch, calls } = mockFetch(
+            json({ transaction_id: "tx6" }),
+            () => {
+                throw new TypeError("connection refused");
+            },
+            () => {
+                throw new TypeError("connection refused");
+            },
+        );
+        const db = createClient("http://db.test", { fetch });
+        const tx = await db.beginTransaction();
+        await assert.rejects(tx.commit(), /POST \/api\/tx\/tx6\/commit could not reach ElysianDB/);
+        await until(() => calls.length === 3);
+    });
+
+    it("does not roll back a commit that ElysianDB rejected", async () => {
+        const { db, calls } = client([json({ transaction_id: "tx7" }), json({ error: "validation error" }, 400)]);
+        const tx = await db.beginTransaction();
+        await assert.rejects(tx.commit(), /failed with status 400: validation error/);
+        assert.equal(calls.length, 2);
+    });
+
+    it("rolls back a commit that timed out or was aborted", async () => {
+        const hangingCommit = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
+            const path = new URL(String(input)).pathname;
+            if (path === "/api/tx/begin") return json({ transaction_id: "tx8" });
+            if (path.endsWith("/rollback")) return empty(200);
+            return new Promise((_resolve, reject) => {
+                if (init.signal!.aborted) reject(new Error("aborted"));
+                init.signal!.addEventListener("abort", () => reject(new Error("aborted")));
+            });
+        }) as typeof fetch;
+        const paths: string[] = [];
+        const db = createClient("http://db.test", {
+            fetch: hangingCommit,
+            onResponse: ({ url }) => {
+                paths.push(new URL(url).pathname);
+            },
+        });
+
+        const tx = await db.beginTransaction();
+        await assert.rejects(tx.commit({ timeout: 10 }), (error: ElysianDBError) => error.code === "TIMEOUT");
+        await until(() => paths.length === 2);
+        assert.deepEqual(paths, ["/api/tx/begin", "/api/tx/tx8/rollback"]);
+
+        const controller = new AbortController();
+        const other = await db.beginTransaction();
+        const commit = other.commit({ signal: controller.signal });
+        controller.abort();
+        await assert.rejects(commit, (error: ElysianDBError) => error.code === "ABORTED");
+        await until(() => paths.length === 4);
+        assert.deepEqual(paths.slice(2), ["/api/tx/begin", "/api/tx/tx8/rollback"], "the rollback ignores the aborted signal");
+    });
+
+    it("does not wait for the rollback of a commit that got no answer", async () => {
+        // The commit hangs until it is aborted, and the rollback takes 300 ms.
+        let rolledBack = false;
+        const slow = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
+            const path = new URL(String(input)).pathname;
+            if (path === "/api/tx/begin") return json({ transaction_id: "tx11" });
+            if (path.endsWith("/rollback")) {
+                await new Promise((resolve) => setTimeout(resolve, 300));
+                rolledBack = true;
+                return empty(200);
+            }
+            return new Promise((_resolve, reject) => {
+                if (init.signal!.aborted) reject(new Error("aborted"));
+                init.signal!.addEventListener("abort", () => reject(new Error("aborted")));
+            });
+        }) as typeof fetch;
+        const db = createClient("http://db.test", { fetch: slow });
+        const tx = await db.beginTransaction();
+
+        const controller = new AbortController();
+        const commit = tx.commit({ signal: controller.signal });
+        setTimeout(() => controller.abort(), 5);
+        await assert.rejects(commit, (error: ElysianDBError) => error.code === "ABORTED");
+        assert.equal(rolledBack, false, "commit() rejects without waiting for the rollback");
+        await until(() => rolledBack);
+    });
+
+    it("rejects IDs that could not be read back", async () => {
+        const { db, calls } = client([json({ transaction_id: "tx9" })]);
+        const tx = await db.beginTransaction();
+        await assert.rejects(tx.create("books", { id: "count" }), /invalid document ID "count"/);
+        await assert.rejects(tx.create("books", { id: "a b" }), /invalid document ID "a b"/);
+        await assert.rejects(tx.update("books", ".", {}), /invalid document ID "\."/);
+        assert.equal(calls.length, 1);
+    });
+
+    it("generates UUIDs without randomUUID()", async () => {
+        const original = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+        const filled: number[] = [];
+        Object.defineProperty(globalThis, "crypto", {
+            value: {
+                getRandomValues: (bytes: Uint8Array) => {
+                    filled.push(bytes.length);
+                    return bytes.fill(0xff);
+                },
+            },
+            configurable: true,
+        });
+        try {
+            const { db } = client([json({ transaction_id: "tx10" }), empty(200)]);
+            const tx = await db.beginTransaction();
+            const document = await tx.create("books", {});
+            assert.deepEqual(filled, [16]);
+            assert.equal(document.id, "ffffffff-ffff-4fff-bfff-ffffffffffff", "version 4, RFC 4122 variant");
+        } finally {
+            Object.defineProperty(globalThis, "crypto", original!);
+        }
+    });
+
     it("refuses operations once the transaction is finished", async () => {
         const { db } = client([json({ transaction_id: "tx3" }), empty(200)]);
         const tx = await db.beginTransaction();
@@ -471,6 +822,32 @@ describe("key-value store", () => {
         const { db } = client([]);
         await assert.rejects(db.kv.get("user:*"), /use mget\(\)/);
     });
+
+    it("rejects wildcards in set(), which could not be read back with get()", async () => {
+        const { db, calls } = client([]);
+        await assert.rejects(db.kv.set("cache:*", "v"), /set\(\) writes one key/);
+        await assert.rejects(db.kv.set("*", "v"), /set\(\) writes one key/);
+        assert.equal(calls.length, 0);
+    });
+
+    it("rejects the key mget, which is the route of mget()", async () => {
+        const { db, calls } = client([empty(204)]);
+        await assert.rejects(db.kv.get("mget"), /invalid key "mget"/);
+        await assert.rejects(db.kv.set("mget", "v"), /invalid key "mget"/);
+        await db.kv.delete("mget");
+        assert.equal(calls.length, 1);
+    });
+
+    it("returns every key of mget(), __proto__ included", async () => {
+        const { db } = client([json([{ key: "__proto__", value: "p" }, { key: "constructor", value: null }])]);
+        const values = await db.kv.mget(["__proto__", "constructor", "toString"]);
+        assert.deepEqual(Object.keys(values), ["__proto__", "constructor"]);
+        assert.equal(values["__proto__"], "p");
+        assert.equal(values.constructor, null);
+        assert.equal(Object.getPrototypeOf(values), Object.prototype, "a plain object, as before");
+        assert.equal(Object.prototype.hasOwnProperty.call(values, "toString"), false);
+        assert.equal(JSON.stringify(values), '{"__proto__":"p","constructor":null}');
+    });
 });
 
 describe("admin", () => {
@@ -492,6 +869,26 @@ describe("admin", () => {
         const backup = await db.admin.backup();
         assert.equal(backup.filename, "elysiandb-backup-20261101T091400Z.tar.gz");
         assert.deepEqual([...backup.data], [31, 139, 8]);
+    });
+
+    it("only keeps plain .tar.gz backup file names", async () => {
+        const names: Array<[string | null, string]> = [
+            ['attachment; filename="../../.ssh/authorized_keys"', "elysiandb-backup.tar.gz"],
+            ['attachment; filename="/etc/cron.d/x.tar.gz"', "x.tar.gz"],
+            ['attachment; filename="..\\..\\backup.tar.gz"', "backup.tar.gz"],
+            ['attachment; filename=".."', "elysiandb-backup.tar.gz"],
+            ['attachment; filename=".hidden.tar.gz"', "elysiandb-backup.tar.gz"],
+            ['attachment; filename="package.json"', "elysiandb-backup.tar.gz"],
+            ['attachment; filename="a b.tar.gz"', "elysiandb-backup.tar.gz"],
+            ["attachment; filename*=UTF-8''x.tar.gz", "elysiandb-backup.tar.gz"],
+            ["attachment; filename=elysiandb-backup-1.tar.gz", "elysiandb-backup-1.tar.gz"],
+            [null, "elysiandb-backup.tar.gz"],
+        ];
+        for (const [disposition, expected] of names) {
+            const headers: Record<string, string> = disposition ? { "Content-Disposition": disposition } : {};
+            const { db } = client([new Response(new Uint8Array([31, 139]), { status: 200, headers })]);
+            assert.equal((await db.admin.backup()).filename, expected, String(disposition));
+        }
     });
 
     it("decodes entity schemas", async () => {
