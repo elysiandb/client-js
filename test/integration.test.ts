@@ -51,6 +51,20 @@ async function rejectsWith(promise: Promise<unknown>, status: number): Promise<E
     assert.fail(`expected a ${status} error`);
 }
 
+/** `DELETE /api/<entity>/` is redirected to `DELETE /api/<entity>`, which deletes every document. */
+async function checkRedirectsAreNotFollowed(db: ElysianDB, entity: string): Promise<void> {
+    const things = db.entity(entity);
+    await things.createMany([{ label: "a" }, { label: "b" }]);
+
+    await assert.rejects(things.delete("."), /invalid document ID "\."/);
+    await assert.rejects(things.get(".."), /invalid document ID "\.\."/);
+    const error = await rejectsWith(db.request("DELETE", `/api/${entity}/`), 308);
+    assert.match(error.message, /was redirected \(308\) to .*: the client does not follow redirects/);
+    assert.equal(await things.count(), 2, "the redirect was not followed");
+
+    await things.deleteAll();
+}
+
 describe("integration: no authentication", { skip: !URL_NONE }, () => {
     let db: ElysianDB;
     const BOOKS = name("books");
@@ -297,6 +311,88 @@ describe("integration: no authentication", { skip: !URL_NONE }, () => {
         assert.match(await db.monitoring.metrics(), /elysiandb_/);
     });
 
+    it("never follows redirects", async () => {
+        await checkRedirectsAreNotFollowed(db, name("redirects"));
+    });
+
+    it("rejects names and IDs that ElysianDB would route elsewhere", async () => {
+        const books = db.entity<Book>(BOOKS);
+        const before = await books.count();
+
+        await assert.rejects(books.get("count"), /invalid document ID "count"/);
+        await assert.rejects(books.update("schema", { year: 1 }), /invalid document ID "schema"/);
+        await assert.rejects(books.create({ id: "a b", title: "x", year: 1, tags: [] }), /invalid document ID "a b"/);
+        await assert.rejects(books.create({ id: "é", title: "x", year: 1, tags: [] }), /invalid document ID "é"/);
+        assert.throws(() => db.entity("query"), /invalid entity name "query"/);
+        await assert.rejects(db.kv.set("k a", "v"), /invalid key "k a"/);
+        assert.equal(await books.count(), before);
+
+        // Every allowed punctuation character round-trips.
+        const id = "a-b_c.d!e~f*g'h(i)j:k@l$m&n+o,p;q=r";
+        await books.create({ id, title: "Punctuation", year: 2000, tags: [] });
+        assert.equal((await books.get(id)).title, "Punctuation");
+        assert.equal(await books.exists(id), true);
+        assert.equal((await books.update(id, { year: 2001 })).year, 2001);
+        await books.delete(id);
+        assert.equal(await books.exists(id), false);
+
+        const key = `${name("kv")}:${id.replace(/[*,]/g, "")}`; // `*` is a wildcard and `,` splits mget() keys
+        await db.kv.set(key, "punctuation");
+        assert.equal(await db.kv.get(key), "punctuation");
+        assert.equal((await db.kv.mget([key]))[key], "punctuation");
+        await db.kv.delete(key);
+        assert.equal(await db.kv.get(key), null);
+    });
+
+    it("validates limit and offset before calling ElysianDB", async () => {
+        const books = db.entity<Book>(BOOKS);
+        await assert.rejects(books.list({ limit: 0 }), /limit must be a positive integer/);
+        await assert.rejects(books.list({ limit: 1.5 }), /limit must be a positive integer/);
+        await assert.rejects(books.query({ offset: -1 }), /offset must be a non-negative integer/);
+        assert.equal((await books.list({ limit: 1 })).length, 1);
+    });
+
+    it("reads back a key named __proto__ with mget()", async () => {
+        await db.kv.set("__proto__", "not a prototype");
+        try {
+            const values = await db.kv.mget(["__proto__"]);
+            assert.deepEqual(Object.keys(values), ["__proto__"]);
+            assert.equal(values["__proto__"], "not a prototype");
+        } finally {
+            await db.kv.delete("__proto__");
+        }
+    });
+
+    it("rolls back a transaction whose commit got no answer", async () => {
+        const books = db.entity<Book>(BOOKS);
+        const before = await books.count();
+        const flaky = createClient(URL_NONE!, {
+            fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+                if (String(input).endsWith("/commit")) throw new TypeError("connection reset");
+                return fetch(input, init);
+            }) as typeof fetch,
+        });
+
+        const tx = await flaky.beginTransaction();
+        await tx.create(BOOKS, { title: "Lost commit", year: 2010, tags: [] });
+        await assert.rejects(tx.commit(), (error: ElysianDBError) => error.code === "NETWORK_ERROR");
+
+        const error = await rejectsWith(db.request("POST", `/api/tx/${tx.id}/commit`), 400);
+        assert.match(error.message, /transaction not found/, "the transaction was rolled back");
+        assert.equal(await books.count(), before);
+    });
+
+    it("rejects the update of a document created in the same transaction", async () => {
+        const tx = await db.beginTransaction();
+        try {
+            const created = await tx.create<Book>(BOOKS, { title: "Draft", year: 2020, tags: [] });
+            const error = await rejectsWith(tx.update(BOOKS, created.id, { year: 2021 }), 400);
+            assert.match(error.message, /entity not found/);
+        } finally {
+            await tx.rollback();
+        }
+    });
+
     it("exposes response headers with send()", async () => {
         await db.entity(BOOKS).list({ limit: 1 });
         const response = await db.send("GET", `/api/${BOOKS}`, { query: { limit: 1 }, requestId: "client-js-test" });
@@ -318,6 +414,10 @@ describe("integration: token mode", { skip: !URL_TOKEN }, () => {
         assert.equal((await db.entity(THINGS).get(thing.id)).label, "ok");
         await db.entity(THINGS).deleteAll();
     });
+
+    it("never follows redirects", async () => {
+        await checkRedirectsAreNotFollowed(createClient(URL_TOKEN!, { auth: { token: TOKEN } }), name("redirects"));
+    });
 });
 
 describe("integration: basic mode", { skip: !URL_BASIC }, () => {
@@ -326,6 +426,11 @@ describe("integration: basic mode", { skip: !URL_BASIC }, () => {
 
         const db = createClient(URL_BASIC!, { auth: { username: "admin", password: ADMIN_PASSWORD } });
         assert.ok(Array.isArray(await db.entity(name("things")).list()));
+    });
+
+    it("never follows redirects", async () => {
+        const db = createClient(URL_BASIC!, { auth: { username: "admin", password: ADMIN_PASSWORD } });
+        await checkRedirectsAreNotFollowed(db, name("redirects"));
     });
 
     it("backs up and restores the instance", async () => {
@@ -409,6 +514,38 @@ describe("integration: user mode", { skip: !URL_USER }, () => {
 
         await db.users.delete(ALICE);
         await rejectsWith(db.users.get(ALICE), 404);
+    });
+
+    it("never follows redirects", async () => {
+        await checkRedirectsAreNotFollowed(db, name("redirects"));
+    });
+
+    it("iterates over every document when an ACL only grants owning_read", async () => {
+        // ElysianDB 0.2.3 applies this ACL after limit and offset, so pages are short before the end.
+        const BOB = name("bob");
+        const SHARED = name("shared");
+        await db.users.create({ username: BOB, password: "bob-password", role: "admin" });
+        const bob = createClient(URL_USER!);
+        await bob.auth.login(BOB, "bob-password");
+
+        try {
+            for (let i = 0; i < 6; i++) {
+                await (i < 4 ? bob : db).entity(SHARED).create({ id: `d${i}`, n: i });
+            }
+            const permissions = { create: true, update: true, delete: true, owning_read: true, owning_update: true, owning_delete: true, owning_write: true };
+            await db.acl.set("admin", SHARED, permissions);
+            const shared = db.entity(SHARED);
+
+            assert.deepEqual((await shared.list({ limit: 2, sort: { id: "asc" } })).map((doc) => doc.id), [], "the first page is empty");
+            assert.deepEqual((await shared.listAll({ pageSize: 2, sort: { id: "asc" } })).map((doc) => doc.id), ["d4", "d5"]);
+            assert.deepEqual((await shared.listAll({ pageSize: 4, filter: { n: { gte: 1 } } })).map((doc) => doc.id).sort(), ["d4", "d5"]);
+            assert.deepEqual((await shared.listAll({ pageSize: 10 })).map((doc) => doc.id).sort(), ["d4", "d5"]);
+        } finally {
+            await db.acl.reset("admin", SHARED);
+            await db.entity(SHARED).deleteAll();
+            await bob.auth.logout().catch(() => undefined);
+            await db.users.delete(BOB);
+        }
     });
 
     it("logs out", async () => {

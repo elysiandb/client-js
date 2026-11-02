@@ -20,8 +20,9 @@ class KVClient {
         if (key.includes("*")) {
             throw new TypeError("ElysianDB: get() reads one key, use mget() to read keys matching a pattern");
         }
+        assertReadable(key);
         try {
-            const entry = await this.http.request("GET", `/kv/${(0, http_js_1.segment)(key)}`, call);
+            const entry = await this.http.request("GET", `/kv/${(0, http_js_1.segment)(key, "key")}`, call);
             return (_a = entry === null || entry === void 0 ? void 0 : entry.value) !== null && _a !== void 0 ? _a : null;
         }
         catch (error) {
@@ -38,10 +39,11 @@ class KVClient {
     /** Stores a value. Strings are stored as they are, anything else as JSON. */
     async set(key, value, options = {}, call) {
         assertKey(key);
+        assertReadable(key);
         if (options.ttl !== undefined && (!Number.isInteger(options.ttl) || options.ttl < 1)) {
             throw new TypeError("ElysianDB: ttl must be a positive number of seconds");
         }
-        await this.http.request("PUT", `/kv/${(0, http_js_1.segment)(key)}`, {
+        await this.http.request("PUT", `/kv/${(0, http_js_1.segment)(key, "key")}`, {
             ...call,
             query: { ttl: options.ttl },
             body: typeof value === "string" ? value : JSON.stringify(value),
@@ -51,9 +53,10 @@ class KVClient {
     /**
      * The values of several keys, as an object keyed by key. Missing keys are `null`.
      * A pattern such as `session:*` adds every matching key.
+     * The object has no prototype, so that any key, `__proto__` included, is an own property.
      */
     async mget(keys, call) {
-        const result = {};
+        const result = Object.create(null);
         if (keys.length === 0)
             return result;
         for (const key of keys) {
@@ -72,11 +75,16 @@ class KVClient {
     /** Deletes a key, or every key matching a pattern such as `cache:*`. */
     async delete(key, call) {
         assertKey(key);
-        await this.http.request("DELETE", `/kv/${(0, http_js_1.segment)(key)}`, call);
+        await this.http.request("DELETE", `/kv/${(0, http_js_1.segment)(key, "key")}`, call);
     }
 }
 exports.KVClient = KVClient;
 function assertKey(key) {
     if (typeof key !== "string" || key === "")
         throw new TypeError("ElysianDB: a key is required");
+}
+/** `GET /kv/mget` is the multi-get route: a key named `mget` could be written but not read back. */
+function assertReadable(key) {
+    if (key === "mget")
+        throw new TypeError(`ElysianDB: invalid key "mget": GET /kv/mget is a route of ElysianDB`);
 }

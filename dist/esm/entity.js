@@ -16,7 +16,7 @@ export class EntityClient {
         this.name = name;
         if (!name)
             throw new TypeError("ElysianDB: an entity name is required");
-        this.path = `/api/${segment(name)}`;
+        this.path = `/api/${entitySegment(name)}`;
     }
     /** Lists documents, with filters, search, sort, pagination, projection and includes (`GET /api/<entity>`). */
     async list(options = {}, call) {
@@ -41,12 +41,25 @@ export class EntityClient {
         if (!Number.isInteger(pageSize) || pageSize < 1) {
             throw new TypeError("ElysianDB: pageSize must be a positive integer");
         }
+        let received = 0;
         for (let offset = 0;; offset += pageSize) {
             const page = await this.list({ ...listOptions, limit: pageSize, offset }, call);
             for (const item of page)
                 yield item;
-            if (page.length < pageSize)
+            received += page.length;
+            if (page.length === pageSize)
+                continue;
+            // A short page is the last one, except in `user` mode when an ACL grants `owning_read` but not `read`:
+            // ElysianDB 0.2.3 applies it after `limit` and `offset`, so pages can be short, or even empty, before
+            // the end. `count()` applies the same ACL to every document.
+            const { filter, search, includes } = listOptions;
+            if (received >= (await this.count({ filter, search, includes }, call)))
                 return;
+            // Fetch the rest in one request, since pagination cannot be trusted here.
+            const rest = await this.list({ ...listOptions, offset: offset + pageSize }, call);
+            for (const item of rest)
+                yield item;
+            return;
         }
     }
     /** The first matching document, or `null` when none matches. */
@@ -56,7 +69,7 @@ export class EntityClient {
     }
     /** Fetches a document by ID. Throws an `ElysianDBError` with `status` 404 when it does not exist. */
     async get(id, options = {}, call) {
-        return this.http.request("GET", this.documentPath(id), {
+        return this.http.request("GET", this.documentPath(readableId(id)), {
             ...call,
             query: toSearchParams({ fields: options.fields, includes: options.includes }),
         });
@@ -98,12 +111,14 @@ export class EntityClient {
      * Sending the `id` of an existing document replaces it.
      */
     async create(data, call) {
+        checkNewId(data);
         return this.http.request("POST", this.path, { ...call, body: data });
     }
     /** Creates several documents at once. Nothing is written if one of them is invalid. */
     async createMany(data, call) {
         if (data.length === 0)
             return [];
+        data.forEach(checkNewId);
         return this.http.request("POST", this.path, { ...call, body: data });
     }
     /**
@@ -111,7 +126,7 @@ export class EntityClient {
      * Throws an `ElysianDBError` with `status` 404 when the document does not exist.
      */
     async update(id, data, call) {
-        return this.http.request("PUT", this.documentPath(id), { ...call, body: data });
+        return this.http.request("PUT", this.documentPath(readableId(id)), { ...call, body: data });
     }
     /**
      * Updates several documents at once: each item holds the `id` of the document and the fields to merge.
@@ -179,6 +194,42 @@ export class EntityClient {
     documentPath(id) {
         if (!id)
             throw new TypeError(`ElysianDB: a document ID is required (entity "${this.name}")`);
-        return `${this.path}/${segment(id)}`;
+        return `${this.path}/${segment(id, "document ID")}`;
     }
+}
+/** Entity names that ElysianDB 0.2.3 routes elsewhere: `/api/query` is the Query API, `/api/export` the export... */
+const RESERVED_ENTITY_NAMES = new Set([
+    "acl",
+    "backup",
+    "entity",
+    "export",
+    "hook",
+    "import",
+    "query",
+    "restore",
+    "security",
+    "tx",
+]);
+/** Document IDs that ElysianDB 0.2.3 routes elsewhere: `GET /api/<entity>/count` counts the documents. */
+const RESERVED_IDS = new Set(["count", "schema"]);
+/** @internal Checks an entity name and returns it unchanged, ready for a URL path. */
+export function entitySegment(name) {
+    segment(name, "entity name");
+    if (RESERVED_ENTITY_NAMES.has(name)) {
+        throw new TypeError(`ElysianDB: invalid entity name "${name}": /api/${name} is a route of ElysianDB`);
+    }
+    return name;
+}
+/** Checks the ID of a document read or updated by ID, and returns it unchanged. */
+function readableId(id) {
+    if (RESERVED_IDS.has(id)) {
+        throw new TypeError(`ElysianDB: invalid document ID "${id}": /api/<entity>/${id} is a route of ElysianDB`);
+    }
+    return id;
+}
+/** @internal Refuses to create a document that could not be read back by its ID. */
+export function checkNewId(data) {
+    const id = data === null || data === void 0 ? void 0 : data.id;
+    if (typeof id === "string" && id !== "")
+        readableId(segment(id, "document ID"));
 }

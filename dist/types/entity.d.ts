@@ -102,3 +102,9 @@ export declare class EntityClient<T extends {
     migrate(actions: MigrationAction[], call?: CallOptions): Promise<void>;
     private documentPath;
 }
+/** @internal Checks an entity name and returns it unchanged, ready for a URL path. */
+export declare function entitySegment(name: string): string;
+/** @internal Refuses to create a document that could not be read back by its ID. */
+export declare function checkNewId(data: {
+    id?: unknown;
+}): void;

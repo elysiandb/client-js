@@ -1,3 +1,5 @@
+import { checkNewId, entitySegment } from "./entity.js";
+import { ElysianDBError } from "./errors.js";
 import { segment } from "./http.js";
 /**
  * A transaction: operations are queued on the server and applied atomically on `commit()`.
@@ -22,22 +24,28 @@ export class Transaction {
     async create(entity, data, call) {
         this.ensureActive();
         const document = { ...data, id: data.id || randomId() };
-        await this.http.request("POST", `${this.path()}/entity/${segment(entity)}`, { ...call, body: document });
+        checkNewId(document);
+        await this.http.request("POST", `${this.path()}/entity/${entitySegment(entity)}`, { ...call, body: document });
         return document;
     }
     /** @deprecated Use `create()`. */
     write(entity, data) {
         return this.create(entity, data);
     }
-    /** Queues a partial update. The commit fails if the document does not exist at that point. */
+    /**
+     * Queues a partial update. The document must already be stored: ElysianDB 0.2.3 rejects the update
+     * of a document created in the same transaction (`400`). The commit fails if the document no longer
+     * exists at that point.
+     */
     async update(entity, id, data, call) {
         this.ensureActive();
-        await this.http.request("PUT", `${this.path()}/entity/${segment(entity)}/${segment(id)}`, { ...call, body: data });
+        // Never retried: a retry after a lost answer would queue the operation twice.
+        await this.http.request("PUT", this.documentPath(entity, id), { ...call, body: data, retries: 0 });
     }
     /** Queues the deletion of a document. */
     async delete(entity, id, call) {
         this.ensureActive();
-        await this.http.request("DELETE", `${this.path()}/entity/${segment(entity)}/${segment(id)}`, call);
+        await this.http.request("DELETE", this.documentPath(entity, id), { ...call, retries: 0 });
     }
     /** Operations on one entity type, typed with `T`. */
     entity(name) {
@@ -56,6 +64,21 @@ export class Transaction {
         try {
             await this.http.request("POST", `${this.path()}/commit`, { ...call, retries: 0 });
         }
+        catch (error) {
+            // Without an answer, the commit may not have reached ElysianDB, which never expires transactions.
+            // Rolling back does nothing when the transaction was committed or discarded in the meantime.
+            if (error instanceof ElysianDBError && error.code !== "HTTP_ERROR") {
+                await this.http
+                    .request("POST", `${this.path()}/rollback`, {
+                    headers: call === null || call === void 0 ? void 0 : call.headers,
+                    requestId: call === null || call === void 0 ? void 0 : call.requestId,
+                    timeout: call === null || call === void 0 ? void 0 : call.timeout,
+                    retries: 0,
+                })
+                    .catch(() => undefined);
+            }
+            throw error;
+        }
         finally {
             // ElysianDB discards the transaction whether the commit succeeds or not.
             this.currentState = "committed";
@@ -69,7 +92,10 @@ export class Transaction {
         await this.http.request("POST", `${this.path()}/rollback`, { ...call, retries: 0 });
     }
     path() {
-        return `/api/tx/${segment(this.id)}`;
+        return `/api/tx/${segment(this.id, "transaction ID")}`;
+    }
+    documentPath(entity, id) {
+        return `${this.path()}/entity/${entitySegment(entity)}/${segment(id, "document ID")}`;
     }
     ensureActive() {
         if (this.currentState !== "active") {
@@ -79,10 +105,19 @@ export class Transaction {
 }
 function randomId() {
     const cryptoApi = globalThis.crypto;
-    if (cryptoApi && typeof cryptoApi.randomUUID === "function")
+    if (typeof (cryptoApi === null || cryptoApi === void 0 ? void 0 : cryptoApi.randomUUID) === "function")
         return cryptoApi.randomUUID();
-    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-        const r = (Math.random() * 16) | 0;
-        return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
-    });
+    // Browsers only have `randomUUID()` on HTTPS pages, but `getRandomValues()` everywhere.
+    const bytes = new Uint8Array(16);
+    if (typeof (cryptoApi === null || cryptoApi === void 0 ? void 0 : cryptoApi.getRandomValues) === "function") {
+        cryptoApi.getRandomValues(bytes);
+    }
+    else {
+        for (let i = 0; i < bytes.length; i++)
+            bytes[i] = (Math.random() * 256) | 0;
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }

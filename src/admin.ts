@@ -1,3 +1,4 @@
+import { entitySegment } from "./entity.js";
 import type { HttpClient, RequestOptions } from "./http.js";
 import { segment } from "./http.js";
 import type {
@@ -44,8 +45,8 @@ export class EntitiesClient {
      * await db.entities.create("books", { title: { type: "string", required: true }, pages: "number" });
      * ```
      */
-    create(name: string, fields: SchemaFieldsInput, call?: CallOptions): Promise<EntitySchema> {
-        return this.http.request<EntitySchema>("POST", `/api/${segment(name)}/create`, { ...call, body: { fields } });
+    async create(name: string, fields: SchemaFieldsInput, call?: CallOptions): Promise<EntitySchema> {
+        return this.http.request<EntitySchema>("POST", `/api/${entitySegment(name)}/create`, { ...call, body: { fields } });
     }
 }
 
@@ -58,12 +59,14 @@ export class UsersClient {
         return result.users ?? [];
     }
 
-    get(username: string, call?: CallOptions): Promise<User> {
+    async get(username: string, call?: CallOptions): Promise<User> {
         return this.http.request<User>("GET", this.userPath(username), call);
     }
 
     /** Creates a user (`role` defaults to `user`). Fails with `409` when the username exists. */
     async create(user: CreateUserInput, call?: CallOptions): Promise<void> {
+        // A username that cannot be used in a URL path could be created but not managed afterwards.
+        segment(user?.username, "username");
         await this.http.request("POST", "/api/security/user", { ...call, body: user });
     }
 
@@ -83,7 +86,7 @@ export class UsersClient {
     }
 
     private userPath(username: string): string {
-        return `/api/security/user/${segment(username)}`;
+        return `/api/security/user/${segment(username, "username")}`;
     }
 }
 
@@ -92,13 +95,13 @@ export class ACLClient {
     constructor(private readonly http: HttpClient) {}
 
     /** The ACL of a user on an entity type. */
-    get(username: string, entity: string, call?: CallOptions): Promise<ACL> {
+    async get(username: string, entity: string, call?: CallOptions): Promise<ACL> {
         return this.http.request<ACL>("GET", this.aclPath(username, entity), call);
     }
 
     /** The ACLs of a user on every entity type. */
     async list(username: string, call?: CallOptions): Promise<ACL[]> {
-        const result = await this.http.request<ACL[] | null>("GET", `/api/acl/${segment(username)}`, call);
+        const result = await this.http.request<ACL[] | null>("GET", `/api/acl/${segment(username, "username")}`, call);
         return result ?? [];
     }
 
@@ -121,7 +124,7 @@ export class ACLClient {
     }
 
     private aclPath(username: string, entity: string): string {
-        return `/api/acl/${segment(username)}/${segment(entity)}`;
+        return `/api/acl/${segment(username, "username")}/${segment(entity, "entity name")}`;
     }
 }
 
@@ -131,12 +134,12 @@ export class HooksClient {
 
     /** Hooks of an entity type. */
     async list(entity: string, call?: CallOptions): Promise<Hook[]> {
-        const result = await this.http.request<Hook[] | null>("GET", `/api/hook/${segment(entity)}`, call);
+        const result = await this.http.request<Hook[] | null>("GET", `/api/hook/${segment(entity, "entity name")}`, call);
         return result ?? [];
     }
 
-    get(id: string, call?: CallOptions): Promise<Hook> {
-        return this.http.request<Hook>("GET", `/api/hook/id/${segment(id)}`, call);
+    async get(id: string, call?: CallOptions): Promise<Hook> {
+        return this.http.request<Hook>("GET", `/api/hook/id/${segment(id, "hook ID")}`, call);
     }
 
     /**
@@ -150,18 +153,18 @@ export class HooksClient {
      * });
      * ```
      */
-    create(entity: string, hook: CreateHookInput, call?: CallOptions): Promise<Hook> {
+    async create(entity: string, hook: CreateHookInput, call?: CallOptions): Promise<Hook> {
         const body = { language: "javascript", priority: 0, enabled: true, bypass_acl: false, ...hook };
-        return this.http.request<Hook>("POST", `/api/hook/${segment(entity)}`, { ...call, body });
+        return this.http.request<Hook>("POST", `/api/hook/${segment(entity, "entity name")}`, { ...call, body });
     }
 
     /** Updates some fields of a hook and returns the full hook. */
-    update(id: string, hook: UpdateHookInput, call?: CallOptions): Promise<Hook> {
-        return this.http.request<Hook>("PUT", `/api/hook/id/${segment(id)}`, { ...call, body: hook });
+    async update(id: string, hook: UpdateHookInput, call?: CallOptions): Promise<Hook> {
+        return this.http.request<Hook>("PUT", `/api/hook/id/${segment(id, "hook ID")}`, { ...call, body: hook });
     }
 
     async delete(entity: string, id: string, call?: CallOptions): Promise<void> {
-        await this.http.request("DELETE", `/api/hook/${segment(entity)}/${segment(id)}`, call);
+        await this.http.request("DELETE", `/api/hook/${segment(entity, "entity name")}/${segment(id, "hook ID")}`, call);
     }
 }
 
@@ -190,8 +193,22 @@ export interface ImportResult {
 export interface Backup {
     /** The `tar.gz` archive. */
     data: Uint8Array;
-    /** File name suggested by ElysianDB, such as `elysiandb-backup-20261101T091400Z.tar.gz`. */
+    /**
+     * File name suggested by ElysianDB, such as `elysiandb-backup-20261101T091400Z.tar.gz`. It is always a
+     * `.tar.gz` file name made of letters, digits, `.`, `_` and `-`, without folder, so that a server cannot
+     * point it outside your folder or at a file that is not an archive: `elysiandb-backup.tar.gz` replaces
+     * any other name.
+     */
     filename: string;
+}
+
+const DEFAULT_BACKUP_FILENAME = "elysiandb-backup.tar.gz";
+
+/** The base name of the file of a `Content-Disposition` header, if it is a plain `.tar.gz` file name. */
+function backupFilename(disposition: string | null): string {
+    const match = /filename="?([^";]+)"?/i.exec(disposition ?? "");
+    const name = match ? match[1].trim().split(/[\\/]/).pop()! : "";
+    return /^[A-Za-z0-9][A-Za-z0-9._-]{0,200}\.tar\.gz$/.test(name) ? name : DEFAULT_BACKUP_FILENAME;
 }
 
 export interface RestoreResult {
@@ -262,10 +279,7 @@ export class AdminClient {
      */
     async backup(call?: CallOptions): Promise<Backup> {
         const response = await this.http.send<Uint8Array>("GET", "/api/backup", { ...call, responseType: "bytes" });
-        const disposition = response.headers.get("Content-Disposition") ?? "";
-        const match = /filename="?([^";]+)"?/.exec(disposition);
-
-        return { data: response.data, filename: match ? match[1] : "elysiandb-backup.tar.gz" };
+        return { data: response.data, filename: backupFilename(response.headers.get("Content-Disposition")) };
     }
 
     /**
