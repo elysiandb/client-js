@@ -23,6 +23,7 @@ A rewrite of the client that covers the whole HTTP API of ElysianDB 0.2.3. See "
 - ES module build and `exports` map, next to CommonJS.
 - Unit tests, integration tests against ElysianDB 0.2.3 in every authentication mode, and a CI workflow.
 - Releases are published from CI with npm provenance.
+- The README is translated into French, Spanish, German, Dutch, Portuguese, Chinese, Korean and Japanese, in `docs/i18n` (not shipped in the package).
 
 ### Changed
 

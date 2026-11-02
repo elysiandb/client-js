@@ -5,6 +5,8 @@
 [![CI](https://github.com/elysiandb/client-js/actions/workflows/ci.yml/badge.svg)](https://github.com/elysiandb/client-js/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENCE)
 
+**English** · [Français](docs/i18n/README.fr.md) · [Español](docs/i18n/README.es.md) · [Deutsch](docs/i18n/README.de.md) · [Nederlands](docs/i18n/README.nl.md) · [Português](docs/i18n/README.pt.md) · [中文](docs/i18n/README.zh.md) · [한국어](docs/i18n/README.ko.md) · [日本語](docs/i18n/README.ja.md)
+
 The official client for [ElysianDB](https://github.com/elysiandb/elysiandb), the single-binary backend that turns JSON into a REST API. It covers the whole HTTP API of ElysianDB 0.2.3:
 
 - **Documents**: typed CRUD, batch writes, filters, search, sort, pagination, projections, includes, async iteration
@@ -685,6 +687,8 @@ npm run test:integration:local
 The CI builds ElysianDB 0.2.3 from source and runs both suites.
 
 To release, run `make release` (or `make release VERSION=minor`) on an up-to-date `main`: it bumps the version and pushes the tag, and the Release workflow runs the CI and publishes the package to npm with provenance. The workflow needs the `NPM_TOKEN` secret.
+
+`README.md` is the reference documentation: change it first, then the translations in [`docs/i18n`](docs/i18n), which are not published to npm. `CHANGELOG.md` is in English only.
 
 ## License
 
