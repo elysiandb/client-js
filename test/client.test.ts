@@ -4,6 +4,13 @@ import { and, createClient, ElysianDB, ElysianDBError, or, toQueryString } from 
 import { toQueryFilter } from "../src/query.js";
 import { client, empty, json, mockFetch, text } from "./helpers.js";
 
+/** Waits until `condition` holds, for work that a method starts without awaiting it. */
+async function until(condition: () => boolean): Promise<void> {
+    const deadline = Date.now() + 2000;
+    while (!condition() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.ok(condition(), "condition not met in time");
+}
+
 interface Book {
     id: string;
     title: string;
@@ -192,6 +199,26 @@ describe("entity routes", () => {
             assert.throws(() => db.entity(value), /invalid entity name/);
         }
         assert.equal(calls.length, 0);
+    });
+
+    it("rejects entity names that would reach the storage keys of other entities", async () => {
+        const { db, calls } = client([json({ transaction_id: "tx1" })]);
+        for (const name of ["books:id", "books*", "*", ":", "b@oks", "b+oks", "b$", ".hidden", "a,b", "a;b", "a=b", "(a)", "a!", "a~", "a'b"]) {
+            assert.throws(() => db.entity(name), /invalid entity name .*: use letters, digits, "_", "-" and "\."/, name);
+            await assert.rejects(db.entities.create(name, {}), /invalid entity name/);
+            await assert.rejects(db.hooks.list(name), /invalid entity name/);
+            await assert.rejects(db.hooks.delete(name, "h1"), /invalid entity name/);
+            await assert.rejects(db.acl.get("bob", name), /invalid entity name/);
+            await assert.rejects(db.acl.reset("bob", name), /invalid entity name/);
+        }
+        const tx = await db.beginTransaction();
+        await assert.rejects(tx.create("books:id", {}), /invalid entity name "books:id"/);
+        await assert.rejects(tx.update("books*", "1", {}), /invalid entity name "books\*"/);
+        assert.equal(calls.length, 1);
+
+        for (const name of ["books", "Books_2", "user-profiles", "v2.books", "_private", "-x", "a..b"]) {
+            assert.equal(db.entity(name).name, name);
+        }
     });
 
     it("rejects entity names that are routes of ElysianDB", async () => {
@@ -635,6 +662,7 @@ describe("transactions", () => {
         await assert.rejects(tx.commit({ requestId: "r1" }), (error: ElysianDBError) => error.code === "NETWORK_ERROR");
         assert.equal(attempt, 1, "a commit is never retried");
         assert.equal(tx.state, "committed");
+        await until(() => calls.length === 3);
         assert.equal(calls[2].url.pathname, "/api/tx/tx5/rollback");
         assert.equal(calls[2].headers["x-request-id"], "r1");
     });
@@ -652,7 +680,7 @@ describe("transactions", () => {
         const db = createClient("http://db.test", { fetch });
         const tx = await db.beginTransaction();
         await assert.rejects(tx.commit(), /POST \/api\/tx\/tx6\/commit could not reach ElysianDB/);
-        assert.equal(calls.length, 3);
+        await until(() => calls.length === 3);
     });
 
     it("does not roll back a commit that ElysianDB rejected", async () => {
@@ -682,6 +710,7 @@ describe("transactions", () => {
 
         const tx = await db.beginTransaction();
         await assert.rejects(tx.commit({ timeout: 10 }), (error: ElysianDBError) => error.code === "TIMEOUT");
+        await until(() => paths.length === 2);
         assert.deepEqual(paths, ["/api/tx/begin", "/api/tx/tx8/rollback"]);
 
         const controller = new AbortController();
@@ -689,7 +718,35 @@ describe("transactions", () => {
         const commit = other.commit({ signal: controller.signal });
         controller.abort();
         await assert.rejects(commit, (error: ElysianDBError) => error.code === "ABORTED");
+        await until(() => paths.length === 4);
         assert.deepEqual(paths.slice(2), ["/api/tx/begin", "/api/tx/tx8/rollback"], "the rollback ignores the aborted signal");
+    });
+
+    it("does not wait for the rollback of a commit that got no answer", async () => {
+        // The commit hangs until it is aborted, and the rollback takes 300 ms.
+        let rolledBack = false;
+        const slow = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
+            const path = new URL(String(input)).pathname;
+            if (path === "/api/tx/begin") return json({ transaction_id: "tx11" });
+            if (path.endsWith("/rollback")) {
+                await new Promise((resolve) => setTimeout(resolve, 300));
+                rolledBack = true;
+                return empty(200);
+            }
+            return new Promise((_resolve, reject) => {
+                if (init.signal!.aborted) reject(new Error("aborted"));
+                init.signal!.addEventListener("abort", () => reject(new Error("aborted")));
+            });
+        }) as typeof fetch;
+        const db = createClient("http://db.test", { fetch: slow });
+        const tx = await db.beginTransaction();
+
+        const controller = new AbortController();
+        const commit = tx.commit({ signal: controller.signal });
+        setTimeout(() => controller.abort(), 5);
+        await assert.rejects(commit, (error: ElysianDBError) => error.code === "ABORTED");
+        assert.equal(rolledBack, false, "commit() rejects without waiting for the rollback");
+        await until(() => rolledBack);
     });
 
     it("rejects IDs that could not be read back", async () => {
@@ -703,16 +760,22 @@ describe("transactions", () => {
 
     it("generates UUIDs without randomUUID()", async () => {
         const original = Object.getOwnPropertyDescriptor(globalThis, "crypto");
-        const { getRandomValues } = globalThis.crypto;
+        const filled: number[] = [];
         Object.defineProperty(globalThis, "crypto", {
-            value: { getRandomValues: getRandomValues.bind(globalThis.crypto) },
+            value: {
+                getRandomValues: (bytes: Uint8Array) => {
+                    filled.push(bytes.length);
+                    return bytes.fill(0xff);
+                },
+            },
             configurable: true,
         });
         try {
             const { db } = client([json({ transaction_id: "tx10" }), empty(200)]);
             const tx = await db.beginTransaction();
             const document = await tx.create("books", {});
-            assert.match(document.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+            assert.deepEqual(filled, [16]);
+            assert.equal(document.id, "ffffffff-ffff-4fff-bfff-ffffffffffff", "version 4, RFC 4122 variant");
         } finally {
             Object.defineProperty(globalThis, "crypto", original!);
         }
@@ -743,7 +806,7 @@ describe("key-value store", () => {
         assert.equal(await db.kv.get("nope"), null);
         await db.kv.set("greeting", "hello", { ttl: 60 });
         await db.kv.set("config", { dark: true });
-        assert.deepEqual({ ...(await db.kv.mget(["a", "b"])) }, { a: "1", b: null });
+        assert.deepEqual(await db.kv.mget(["a", "b"]), { a: "1", b: null });
         await db.kv.delete("cache:*");
 
         assert.equal(calls[0].url.pathname, "/kv/user:1");
@@ -760,6 +823,13 @@ describe("key-value store", () => {
         await assert.rejects(db.kv.get("user:*"), /use mget\(\)/);
     });
 
+    it("rejects wildcards in set(), which could not be read back with get()", async () => {
+        const { db, calls } = client([]);
+        await assert.rejects(db.kv.set("cache:*", "v"), /set\(\) writes one key/);
+        await assert.rejects(db.kv.set("*", "v"), /set\(\) writes one key/);
+        assert.equal(calls.length, 0);
+    });
+
     it("rejects the key mget, which is the route of mget()", async () => {
         const { db, calls } = client([empty(204)]);
         await assert.rejects(db.kv.get("mget"), /invalid key "mget"/);
@@ -774,7 +844,9 @@ describe("key-value store", () => {
         assert.deepEqual(Object.keys(values), ["__proto__", "constructor"]);
         assert.equal(values["__proto__"], "p");
         assert.equal(values.constructor, null);
-        assert.equal(values.toString, undefined);
+        assert.equal(Object.getPrototypeOf(values), Object.prototype, "a plain object, as before");
+        assert.equal(Object.prototype.hasOwnProperty.call(values, "toString"), false);
+        assert.equal(JSON.stringify(values), '{"__proto__":"p","constructor":null}');
     });
 });
 

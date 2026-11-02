@@ -212,9 +212,18 @@ const RESERVED_ENTITY_NAMES = new Set([
 ]);
 /** Document IDs that ElysianDB 0.2.3 routes elsewhere: `GET /api/<entity>/count` counts the documents. */
 const RESERVED_IDS = new Set(["count", "schema"]);
+/**
+ * Characters of an entity name. ElysianDB 0.2.3 builds storage keys (`api:entity:<name>:...`) and glob patterns
+ * from it, so `:` and `*` would reach other entities: `entity("books:id").deleteAll()` deletes every book.
+ */
+const ENTITY_NAME = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
 /** @internal Checks an entity name and returns it unchanged, ready for a URL path. */
 export function entitySegment(name) {
     segment(name, "entity name");
+    if (!ENTITY_NAME.test(name)) {
+        throw new TypeError(`ElysianDB: invalid entity name ${JSON.stringify(name)}: use letters, digits, "_", "-" and ".", ` +
+            "since ElysianDB 0.2.3 builds storage keys and patterns from it");
+    }
     if (RESERVED_ENTITY_NAMES.has(name)) {
         throw new TypeError(`ElysianDB: invalid entity name "${name}": /api/${name} is a route of ElysianDB`);
     }

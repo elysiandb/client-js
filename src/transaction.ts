@@ -8,6 +8,9 @@ export type TransactionState = "active" | "committed" | "rolled_back";
 
 type CallOptions = Pick<RequestOptions, "signal" | "timeout" | "requestId" | "headers">;
 
+/** Timeout of the rollback sent after a commit that got no answer. */
+const ROLLBACK_TIMEOUT_MS = 10_000;
+
 /** Operations of a transaction on one entity type, returned by `tx.entity<T>("name")`. */
 export interface TransactionEntity<T extends { id: string }> {
     create(data: CreateInput<T>): Promise<T>;
@@ -90,12 +93,13 @@ export class Transaction {
         } catch (error) {
             // Without an answer, the commit may not have reached ElysianDB, which never expires transactions.
             // Rolling back does nothing when the transaction was committed or discarded in the meantime.
+            // It is not awaited: the server may be the reason why the commit got no answer.
             if (error instanceof ElysianDBError && error.code !== "HTTP_ERROR") {
-                await this.http
+                this.http
                     .request("POST", `${this.path()}/rollback`, {
                         headers: call?.headers,
                         requestId: call?.requestId,
-                        timeout: call?.timeout,
+                        timeout: ROLLBACK_TIMEOUT_MS,
                         retries: 0,
                     })
                     .catch(() => undefined);

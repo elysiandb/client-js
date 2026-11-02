@@ -4,6 +4,8 @@ exports.Transaction = void 0;
 const entity_js_1 = require("./entity.js");
 const errors_js_1 = require("./errors.js");
 const http_js_1 = require("./http.js");
+/** Timeout of the rollback sent after a commit that got no answer. */
+const ROLLBACK_TIMEOUT_MS = 10000;
 /**
  * A transaction: operations are queued on the server and applied atomically on `commit()`.
  * They cannot be read back before the commit, by this client or any other.
@@ -70,12 +72,13 @@ class Transaction {
         catch (error) {
             // Without an answer, the commit may not have reached ElysianDB, which never expires transactions.
             // Rolling back does nothing when the transaction was committed or discarded in the meantime.
+            // It is not awaited: the server may be the reason why the commit got no answer.
             if (error instanceof errors_js_1.ElysianDBError && error.code !== "HTTP_ERROR") {
-                await this.http
+                this.http
                     .request("POST", `${this.path()}/rollback`, {
                     headers: call === null || call === void 0 ? void 0 : call.headers,
                     requestId: call === null || call === void 0 ? void 0 : call.requestId,
-                    timeout: call === null || call === void 0 ? void 0 : call.timeout,
+                    timeout: ROLLBACK_TIMEOUT_MS,
                     retries: 0,
                 })
                     .catch(() => undefined);

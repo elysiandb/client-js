@@ -325,6 +325,13 @@ describe("integration: no authentication", { skip: !URL_NONE }, () => {
         await assert.rejects(books.create({ id: "é", title: "x", year: 1, tags: [] }), /invalid document ID "é"/);
         assert.throws(() => db.entity("query"), /invalid entity name "query"/);
         await assert.rejects(db.kv.set("k a", "v"), /invalid key "k a"/);
+        await assert.rejects(db.kv.set(`${name("kv")}:*`, "v"), /set\(\) writes one key/);
+        assert.equal(await books.count(), before);
+
+        // ElysianDB builds storage keys from entity names: "<books>:id" would reach the documents of <books>.
+        assert.throws(() => db.entity(`${BOOKS}:id`), /invalid entity name/);
+        assert.throws(() => db.entity(`${BOOKS.slice(0, -1)}*`), /invalid entity name/);
+        await assert.rejects(db.hooks.list(`${BOOKS}:id`), /invalid entity name/);
         assert.equal(await books.count(), before);
 
         // Every allowed punctuation character round-trips.
@@ -366,16 +373,22 @@ describe("integration: no authentication", { skip: !URL_NONE }, () => {
     it("rolls back a transaction whose commit got no answer", async () => {
         const books = db.entity<Book>(BOOKS);
         const before = await books.count();
+        let rolledBack = false;
         const flaky = createClient(URL_NONE!, {
             fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
                 if (String(input).endsWith("/commit")) throw new TypeError("connection reset");
                 return fetch(input, init);
             }) as typeof fetch,
+            onResponse: ({ url, status }) => {
+                if (url.endsWith("/rollback") && status === 200) rolledBack = true;
+            },
         });
 
         const tx = await flaky.beginTransaction();
         await tx.create(BOOKS, { title: "Lost commit", year: 2010, tags: [] });
         await assert.rejects(tx.commit(), (error: ElysianDBError) => error.code === "NETWORK_ERROR");
+        for (let i = 0; i < 200 && !rolledBack; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+        assert.ok(rolledBack, "the rollback is sent without being awaited");
 
         const error = await rejectsWith(db.request("POST", `/api/tx/${tx.id}/commit`), 400);
         assert.match(error.message, /transaction not found/, "the transaction was rolled back");

@@ -22,7 +22,6 @@ export declare class KVClient {
     /**
      * The values of several keys, as an object keyed by key. Missing keys are `null`.
      * A pattern such as `session:*` adds every matching key.
-     * The object has no prototype, so that any key, `__proto__` included, is an own property.
      */
     mget(keys: string[], call?: CallOptions): Promise<Record<string, string | null>>;
     /** Deletes a key, or every key matching a pattern such as `cache:*`. */

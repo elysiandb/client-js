@@ -36,6 +36,9 @@ export class KVClient {
     /** Stores a value. Strings are stored as they are, anything else as JSON. */
     async set(key, value, options = {}, call) {
         assertKey(key);
+        if (key.includes("*")) {
+            throw new TypeError("ElysianDB: set() writes one key, and `*` is the wildcard of mget() and delete()");
+        }
         assertReadable(key);
         if (options.ttl !== undefined && (!Number.isInteger(options.ttl) || options.ttl < 1)) {
             throw new TypeError("ElysianDB: ttl must be a positive number of seconds");
@@ -50,10 +53,9 @@ export class KVClient {
     /**
      * The values of several keys, as an object keyed by key. Missing keys are `null`.
      * A pattern such as `session:*` adds every matching key.
-     * The object has no prototype, so that any key, `__proto__` included, is an own property.
      */
     async mget(keys, call) {
-        const result = Object.create(null);
+        const result = {};
         if (keys.length === 0)
             return result;
         for (const key of keys) {
@@ -65,8 +67,10 @@ export class KVClient {
             ...call,
             query: { keys: keys.join(",") },
         });
-        for (const entry of entries !== null && entries !== void 0 ? entries : [])
-            result[entry.key] = entry.value;
+        // Defined rather than assigned, so that a key named `__proto__` is kept as an own property.
+        for (const entry of entries !== null && entries !== void 0 ? entries : []) {
+            Object.defineProperty(result, entry.key, { value: entry.value, enumerable: true, writable: true, configurable: true });
+        }
         return result;
     }
     /** Deletes a key, or every key matching a pattern such as `cache:*`. */

@@ -124,7 +124,7 @@ export class ACLClient {
     }
 
     private aclPath(username: string, entity: string): string {
-        return `/api/acl/${segment(username, "username")}/${segment(entity, "entity name")}`;
+        return `/api/acl/${segment(username, "username")}/${entitySegment(entity)}`;
     }
 }
 
@@ -134,7 +134,7 @@ export class HooksClient {
 
     /** Hooks of an entity type. */
     async list(entity: string, call?: CallOptions): Promise<Hook[]> {
-        const result = await this.http.request<Hook[] | null>("GET", `/api/hook/${segment(entity, "entity name")}`, call);
+        const result = await this.http.request<Hook[] | null>("GET", `/api/hook/${entitySegment(entity)}`, call);
         return result ?? [];
     }
 
@@ -155,7 +155,7 @@ export class HooksClient {
      */
     async create(entity: string, hook: CreateHookInput, call?: CallOptions): Promise<Hook> {
         const body = { language: "javascript", priority: 0, enabled: true, bypass_acl: false, ...hook };
-        return this.http.request<Hook>("POST", `/api/hook/${segment(entity, "entity name")}`, { ...call, body });
+        return this.http.request<Hook>("POST", `/api/hook/${entitySegment(entity)}`, { ...call, body });
     }
 
     /** Updates some fields of a hook and returns the full hook. */
@@ -164,7 +164,7 @@ export class HooksClient {
     }
 
     async delete(entity: string, id: string, call?: CallOptions): Promise<void> {
-        await this.http.request("DELETE", `/api/hook/${segment(entity, "entity name")}/${segment(id, "hook ID")}`, call);
+        await this.http.request("DELETE", `/api/hook/${entitySegment(entity)}/${segment(id, "hook ID")}`, call);
     }
 }
 

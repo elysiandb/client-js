@@ -32,11 +32,10 @@ A rewrite of the client that covers the whole HTTP API of ElysianDB 0.2.3. See "
 - `count()` returns a number instead of `{ count }`.
 - `list()` throws when `sort` has several fields, since ElysianDB only applies one: use `query()`.
 - `Content-Type: application/json` is only sent with JSON bodies, which avoids a CORS preflight on browser reads.
-- Entity names, document IDs, keys, usernames and hook IDs are checked before any request, and a `TypeError` is thrown for values that ElysianDB 0.2.3 would route elsewhere or could not read back: `.` and `..`, characters other than letters, digits and `- _ . ! ~ * ' ( ) : @ $ & + , ; =`, the entity names `query`, `export`, `import`, `backup`, `restore`, `tx`, `entity`, `hook`, `acl` and `security`, the IDs `count` and `schema` in `get()`, `update()` and `create()`, and the key `mget` in `kv.get()` and `kv.set()`. See "Names, IDs and keys" in the README.
+- Entity names, document IDs, keys, usernames and hook IDs are checked before any request, and a `TypeError` is thrown for values that ElysianDB 0.2.3 would route elsewhere or could not read back: `.` and `..`, characters other than letters, digits and `- _ . ! ~ * ' ( ) : @ $ & + , ; =`, entity names with characters other than letters, digits, `_`, `-` and `.`, the entity names `query`, `export`, `import`, `backup`, `restore`, `tx`, `entity`, `hook`, `acl` and `security`, the IDs `count` and `schema` in `get()`, `update()` and `create()`, and the key `mget`, or keys with `*`, in `kv.get()` and `kv.set()`. See "Names, IDs and keys" in the README.
 - Redirects are never followed: they fail with an `ElysianDBError` that gives the new location.
 - `limit` must be a positive integer and `offset` a non-negative integer, in `list()` and `query()`.
 - `iterate()` and `listAll()` call `count()` once they reach a short page, to check that every document was read.
-- `kv.mget()` returns an object without prototype.
 - `admin.backup()` only keeps plain `.tar.gz` file names suggested by the server, and uses `elysiandb-backup.tar.gz` otherwise.
 - The operations of a transaction are never retried, and a commit that gets no answer is rolled back.
 - `tx.create()` generates IDs with `crypto.getRandomValues()` when `crypto.randomUUID()` is missing, as on pages not served over HTTPS.
@@ -59,6 +58,7 @@ A rewrite of the client that covers the whole HTTP API of ElysianDB 0.2.3. See "
 - `iterate()` and `listAll()` could stop before the end in `user` mode, when an ACL grants `owning_read` but not `read`.
 - A commit that got no answer could leave its transaction open forever on the server, and a retried transaction operation could be queued twice.
 - `kv.mget()` dropped a key named `__proto__`.
+- `db.entity("books:id").deleteAll()` deleted every book, and `db.entity("b*").deleteAll()` dropped the indexes of every entity whose name starts with `b`.
 - A server could make the README backup example write outside the current folder, through the file name of `admin.backup()`.
 - `db.startTransaction()`, documented in the README, did not exist: use `db.beginTransaction()` or `db.transaction()`.
 - `db.transaction()` hid the error of the callback when the rollback failed.

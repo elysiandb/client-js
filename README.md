@@ -237,7 +237,9 @@ await books.count({ filter: { year: { lt: 1970 } } });  // matching documents
 
 ## Names, IDs and keys
 
-Entity names, document IDs, keys, usernames and hook IDs go in URL paths, and ElysianDB 0.2.3 does not decode them consistently: a value that needs percent-encoding could be written but not read back. The client only accepts values made of letters (`A-Z`, `a-z`), digits and `- _ . ! ~ * ' ( ) : @ $ & + , ; =`, and throws a `TypeError` for anything else, such as spaces, accented letters, `/`, `?`, `#` or `%`. `create()` and `createMany()` check the `id` you pass the same way, so that every document can be read back.
+Entity names, document IDs, keys, usernames and hook IDs go in URL paths, and ElysianDB 0.2.3 does not decode them consistently: a key or an ID that needs percent-encoding could be written but not read back. The client only accepts values made of letters (`A-Z`, `a-z`), digits and `- _ . ! ~ * ' ( ) : @ $ & + , ; =`, and throws a `TypeError` for anything else, such as spaces, accented letters, `/`, `?`, `#` or `%`. `create()` and `createMany()` check the `id` you pass the same way, so that every document can be read back.
+
+Entity names are stricter: letters, digits, `_`, `-` and `.`, without a leading `.`. ElysianDB builds its storage keys and patterns from them, so `:` or `*` would reach other entities: `db.entity("books:id").deleteAll()` would delete every book. Entity types created with other names, by another client, stay reachable with `db.request()` and `encodeURIComponent()`.
 
 Some values are rejected because ElysianDB routes them elsewhere, or because `fetch` removes them from URLs:
 
@@ -247,6 +249,9 @@ Some values are rejected because ElysianDB routes them elsewhere, or because `fe
 | `query`, `export`, `import`, `backup`, `restore`, `tx`, `entity`, `hook`, `acl`, `security` | Entity name | `/api/query` is the Query API, `/api/export` the export, and so on. |
 | `count`, `schema` | Document ID in `get()`, `update()` and `create()` | `GET /api/books/count` counts the books. `exists()` and `delete()` still accept them. |
 | `mget` | Key in `kv.get()` and `kv.set()` | `GET /kv/mget` is the route of `mget()`. |
+| Keys with `*` | Key in `kv.get()` and `kv.set()` | `*` is the wildcard of `mget()` and `delete()`. |
+
+ElysianDB 0.2.3 also compares some storage keys without case: do not use entity names that differ only by case, since `deleteAll()` on `Books` drops the indexes of `books`.
 
 The client never follows HTTP redirects either, since a redirect would replay the request, credentials included, on another URL. A redirect fails with an `ElysianDBError` that gives the new location: check the URL of the server if you get one.
 
@@ -393,7 +398,7 @@ await db.kv.mget(["greeting", "session:*"]); // { greeting: "hello", "session:42
 await db.kv.delete("session:*");             // `*` deletes every matching key
 ```
 
-Values are strings. Keys follow the [rules of names and IDs](#names-ids-and-keys): `*` is a wildcard in `mget()` and `delete()`, and `mget()` keys cannot contain `,`. `mget()` returns an object without prototype, so that every key, `__proto__` included, is an own property. In `user` mode, the key–value store needs an admin.
+Values are strings. Keys follow the [rules of names and IDs](#names-ids-and-keys). `*` is a wildcard in `mget()` and `delete()`, and patterns ignore case: `delete("Cache:*")` also deletes `cache:1`. `mget()` keys cannot contain `,`. In `user` mode, the key–value store needs an admin.
 
 ## Entity types, schemas and migrations
 

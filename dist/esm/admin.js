@@ -94,7 +94,7 @@ export class ACLClient {
         await this.http.request("PUT", `${this.aclPath(username, entity)}/default`, call);
     }
     aclPath(username, entity) {
-        return `/api/acl/${segment(username, "username")}/${segment(entity, "entity name")}`;
+        return `/api/acl/${segment(username, "username")}/${entitySegment(entity)}`;
     }
 }
 /** JavaScript hooks run on reads (`db.hooks`). Requires `api.hooks.enabled` and admin credentials. */
@@ -104,7 +104,7 @@ export class HooksClient {
     }
     /** Hooks of an entity type. */
     async list(entity, call) {
-        const result = await this.http.request("GET", `/api/hook/${segment(entity, "entity name")}`, call);
+        const result = await this.http.request("GET", `/api/hook/${entitySegment(entity)}`, call);
         return result !== null && result !== void 0 ? result : [];
     }
     async get(id, call) {
@@ -123,14 +123,14 @@ export class HooksClient {
      */
     async create(entity, hook, call) {
         const body = { language: "javascript", priority: 0, enabled: true, bypass_acl: false, ...hook };
-        return this.http.request("POST", `/api/hook/${segment(entity, "entity name")}`, { ...call, body });
+        return this.http.request("POST", `/api/hook/${entitySegment(entity)}`, { ...call, body });
     }
     /** Updates some fields of a hook and returns the full hook. */
     async update(id, hook, call) {
         return this.http.request("PUT", `/api/hook/id/${segment(id, "hook ID")}`, { ...call, body: hook });
     }
     async delete(entity, id, call) {
-        await this.http.request("DELETE", `/api/hook/${segment(entity, "entity name")}/${segment(id, "hook ID")}`, call);
+        await this.http.request("DELETE", `/api/hook/${entitySegment(entity)}/${segment(id, "hook ID")}`, call);
     }
 }
 const DEFAULT_BACKUP_FILENAME = "elysiandb-backup.tar.gz";
