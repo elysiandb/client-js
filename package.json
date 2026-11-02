@@ -1,23 +1,56 @@
 {
   "name": "@elysiandbjs/client",
   "version": "0.0.13",
-  "description": "Official TypeScript/JavaScript client for ElysianDB",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "description": "Official TypeScript/JavaScript client for ElysianDB: entities, queries, transactions, KV, auth, admin and monitoring",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENCE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
-    "build": "tsc",
-    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc -p tsconfig.json && tsc -p tsconfig.esm.json && node scripts/postbuild.mjs",
+    "clean": "rm -rf dist .test-dist",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "rm -rf .test-dist && tsc -p tsconfig.test.json && node --test .test-dist/test/*.test.js",
+    "test:integration": "ELYSIANDB_INTEGRATION=1 npm test",
     "prepare": "npm run build",
-    "demo": "ts-node src/demo.ts"
+    "demo": "npm run build && node examples/demo.mjs",
+    "test:integration:local": "ELYSIANDB_URL=http://127.0.0.1:18089 ELYSIANDB_TOKEN_URL=http://127.0.0.1:18090 ELYSIANDB_TOKEN=test-token ELYSIANDB_BASIC_URL=http://127.0.0.1:18091 ELYSIANDB_USER_URL=http://127.0.0.1:18092 ELYSIANDB_ADMIN_PASSWORD=admin-password-123 npm run test:integration"
   },
   "keywords": [
     "elysiandb",
     "database",
     "kv",
+    "key-value",
     "rest",
     "client",
-    "sdk"
+    "sdk",
+    "typescript"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/elysiandb/client-js.git"
+  },
+  "homepage": "https://github.com/elysiandb/client-js#readme",
+  "bugs": {
+    "url": "https://github.com/elysiandb/client-js/issues"
+  },
   "publishConfig": {
     "access": "public"
   },

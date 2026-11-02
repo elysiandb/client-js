@@ -1,12 +1,18 @@
 {
   "compilerOptions": {
     "target": "ES2019",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "commonjs",
-    "declaration": true,
-    "outDir": "dist",
+    "moduleResolution": "node",
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "rootDir": "src",
+    "outDir": "dist/cjs",
+    "declaration": true,
+    "declarationDir": "dist/types",
+    "sourceMap": false
   },
   "include": ["src"]
 }
