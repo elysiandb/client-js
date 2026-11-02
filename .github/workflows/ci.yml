@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  ELYSIANDB_VERSION: v0.2.3
+
+jobs:
+  unit:
+    name: Build and unit tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [18, 20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+
+  integration:
+    name: Integration tests (ElysianDB ${{ env.ELYSIANDB_VERSION }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Build ElysianDB
+        run: |
+          git clone --depth 1 --branch "$ELYSIANDB_VERSION" https://github.com/elysiandb/elysiandb.git "$RUNNER_TEMP/elysiandb"
+          cd "$RUNNER_TEMP/elysiandb"
+          go build -ldflags "-X github.com/taymour/elysiandb/internal/globals.VERSION=${ELYSIANDB_VERSION#v}" -o "$RUNNER_TEMP/elysiandb-bin" .
+      - name: Start ElysianDB servers
+        run: scripts/start-test-servers.sh "$RUNNER_TEMP/elysiandb-bin" "$RUNNER_TEMP/servers"
+      - run: npm ci
+      - run: npm run test:integration:local
+      - name: Server logs
+        if: failure()
+        run: tail -n 50 "$RUNNER_TEMP"/servers/*.log

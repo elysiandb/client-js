@@ -13,6 +13,13 @@ build:
 	npm run build
 	@echo "Build completed."
 
+test:
+	npm test
+
+# Needs the servers of scripts/start-test-servers.sh
+test-integration:
+	npm run test:integration:local
+
 login:
 	@if [ -z "$(NPM_USER)" ]; then \
 		echo "You are not logged in to npm. Logging in..."; \
