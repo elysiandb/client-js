@@ -60,6 +60,8 @@ export interface HttpClientOptions {
 }
 
 const IDEMPOTENT_METHODS = new Set<HttpMethod>(["GET", "HEAD", "PUT", "DELETE"]);
+// ElysianDB treats `POST /api/query` as a read: since 0.3.0 it can answer `503 server busy` with `Retry-After`.
+const READ_ONLY_POSTS = new Set(["/api/query"]);
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_RETRY_DELAY_MS = 30_000;
@@ -72,6 +74,8 @@ const STATUS_HINTS: Record<number, string> = {
     409: "conflict",
     429: "too many requests",
     500: "internal server error",
+    503: "service unavailable",
+    507: "insufficient storage, the disk of the server is full",
 };
 
 export class HttpClient {
@@ -95,7 +99,7 @@ export class HttpClient {
     async send<T = unknown>(method: HttpMethod, path: string, options: RequestOptions = {}): Promise<HttpResponse<T>> {
         const url = this.buildUrl(path, options.query);
         const retries = Math.max(0, options.retries ?? this.options.retries ?? 0);
-        const canRetry = IDEMPOTENT_METHODS.has(method);
+        const canRetry = IDEMPOTENT_METHODS.has(method) || (method === "POST" && READ_ONLY_POSTS.has(path));
         const timeout = options.timeout ?? this.options.timeout;
         const fetchImpl = this.options.fetch ?? globalThis.fetch;
 
@@ -295,7 +299,7 @@ function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Characters of a path segment that ElysianDB 0.2.3 reads back as they were written. */
+/** Characters of a path segment that ElysianDB reads back as they were written. */
 const PATH_SEGMENT = /^[A-Za-z0-9\-_.!~*'():@$&+,;=]+$/;
 
 /** Punctuation of `PATH_SEGMENT`, for error messages. */
@@ -306,7 +310,7 @@ const PATH_SEGMENT_PUNCTUATION = "- _ . ! ~ * ' ( ) : @ $ & + , ; =";
  *
  * - `.` and `..` are rejected: `fetch` removes them from URLs, so `DELETE /api/books/.` would become
  *   `DELETE /api/books/`, which deletes the whole entity.
- * - Characters that need percent-encoding are rejected: ElysianDB 0.2.3 decodes some path parameters and not
+ * - Characters that need percent-encoding are rejected: ElysianDB decodes some path parameters and not
  *   others, so the value could be written but not read back (`PUT /kv/a%20b` stores the key `a%20b`).
  */
 export function segment(value: string, label: string): string {
@@ -320,7 +324,7 @@ export function segment(value: string, label: string): string {
 
     if (!PATH_SEGMENT.test(value)) {
         throw new TypeError(
-            `ElysianDB: invalid ${label} ${JSON.stringify(value)}: ElysianDB 0.2.3 only reads back path segments ` +
+            `ElysianDB: invalid ${label} ${JSON.stringify(value)}: ElysianDB only reads back path segments ` +
                 `made of letters, digits and ${PATH_SEGMENT_PUNCTUATION}`,
         );
     }

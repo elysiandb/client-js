@@ -18,12 +18,14 @@ test:
 test-integration:
 	npm run test:integration:local
 
-# Bumps the version (VERSION=patch, minor, major or x.y.z) and pushes the tag:
+# Tags the version of package.json on an up-to-date main and pushes the tag:
 # the Release workflow then publishes the package to npm with provenance.
-VERSION ?= patch
+# The version itself is set in a pull request (npm version x.y.z --no-git-tag-version).
+TAG = v$(shell node -p 'require("./package.json").version')
 
 release:
 	@test -z "$$(git status --porcelain)" || { echo "The working tree is not clean"; exit 1; }
 	@test "$$(git rev-parse --abbrev-ref HEAD)" = main || { echo "Releases are made from main"; exit 1; }
-	npm version $(VERSION)
-	git push --follow-tags
+	git pull --ff-only
+	git tag $(TAG)
+	git push origin $(TAG)

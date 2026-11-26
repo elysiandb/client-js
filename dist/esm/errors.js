@@ -37,6 +37,14 @@ export class ElysianDBError extends Error {
     get isRateLimited() {
         return this.status === 429;
     }
+    /** `503`: the server is busy, starting, or cannot write to its disk. See `retryAfter`. */
+    get isUnavailable() {
+        return this.status === 503;
+    }
+    /** `507`: the disk of the server is full, writes are refused until space is freed (ElysianDB 0.3.0 and later). */
+    get isStorageFull() {
+        return this.status === 507;
+    }
     get isValidationError() {
         return this.validationErrors.length > 0;
     }

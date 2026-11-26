@@ -29,7 +29,7 @@ export class ElysianDBError extends Error {
     readonly url: string;
     readonly data: unknown;
     readonly requestId?: string;
-    /** Seconds to wait before retrying, from the `Retry-After` header of a `429` answer. */
+    /** Seconds to wait before retrying, from the `Retry-After` header (`429`, and since ElysianDB 0.3.0 `503` and `507`). */
     readonly retryAfter?: number;
     readonly validationErrors: ValidationError[];
     readonly cause?: unknown;
@@ -67,6 +67,16 @@ export class ElysianDBError extends Error {
 
     get isRateLimited(): boolean {
         return this.status === 429;
+    }
+
+    /** `503`: the server is busy, starting, or cannot write to its disk. See `retryAfter`. */
+    get isUnavailable(): boolean {
+        return this.status === 503;
+    }
+
+    /** `507`: the disk of the server is full, writes are refused until space is freed (ElysianDB 0.3.0 and later). */
+    get isStorageFull(): boolean {
+        return this.status === 507;
     }
 
     get isValidationError(): boolean {

@@ -1,7 +1,8 @@
 name: Release
 
-# Publishes the package to npm, with provenance, when a version tag such as v0.1.0 is pushed.
-# The NPM_TOKEN secret must hold an npm automation token of the @elysiandbjs scope.
+# Publishes the package to npm, with provenance, when a version tag such as v0.4.0 is pushed.
+# It uses npm trusted publishing (OIDC): the package trusts this workflow in the `npm` environment,
+# so no npm token is stored in the repository.
 
 on:
   push:
@@ -21,15 +22,17 @@ jobs:
     environment: npm
     permissions:
       contents: read
-      id-token: write # npm provenance
+      id-token: write # npm trusted publishing and provenance
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
+      - name: Use npm 11.5.1 or later (trusted publishing)
+        run: npm install -g npm@11
       - name: Check that the tag matches package.json
         run: |
           version="v$(node -p 'require("./package.json").version')"
@@ -39,5 +42,3 @@ jobs:
           fi
       - run: npm ci
       - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

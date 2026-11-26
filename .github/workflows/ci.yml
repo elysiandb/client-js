@@ -34,8 +34,15 @@ jobs:
     name: Integration tests (ElysianDB ${{ matrix.elysiandb }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        elysiandb: [v0.2.3]
+        include:
+          # Reference version: the static binary of the published image, pinned by digest.
+          - elysiandb: v0.4.0
+            image: taymour/elysiandb@sha256:59a30a7888275af01ef4c9848a13c4e455d184d949e916f94727bbc6acc2334d
+          # Last Go version, tested during the migration.
+          - elysiandb: v0.3.0
+            go: "1.24"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -43,11 +50,22 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
+      - name: Extract ElysianDB from its image
+        if: matrix.image
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          docker pull "$IMAGE"
+          container="$(docker create "$IMAGE")"
+          docker cp "$container:/usr/local/bin/elysiandb" "$RUNNER_TEMP/elysiandb-bin"
+          docker rm "$container"
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        if: matrix.go
         with:
-          go-version: "1.24"
+          go-version: ${{ matrix.go }}
           cache: false
-      - name: Build ElysianDB
+      - name: Build ElysianDB from source
+        if: matrix.go
         env:
           ELYSIANDB_VERSION: ${{ matrix.elysiandb }}
         run: |
@@ -56,6 +74,13 @@ jobs:
           go build -ldflags "-X github.com/taymour/elysiandb/internal/globals.VERSION=${ELYSIANDB_VERSION#v}" -o "$RUNNER_TEMP/elysiandb-bin" .
       - name: Start ElysianDB servers
         run: scripts/start-test-servers.sh "$RUNNER_TEMP/elysiandb-bin" "$RUNNER_TEMP/servers"
+      - name: Check the version served
+        env:
+          ELYSIANDB_VERSION: ${{ matrix.elysiandb }}
+        run: |
+          served="$(curl -fsS http://127.0.0.1:18089/health -o /dev/null -D - | tr -d '\r' | awk -F': ' 'tolower($1) == "x-elysian-version" { print $2 }')"
+          echo "ElysianDB $served"
+          test "$served" = "${ELYSIANDB_VERSION#v}"
       - run: npm ci
       - run: npm run test:integration:local
       - name: Server logs
