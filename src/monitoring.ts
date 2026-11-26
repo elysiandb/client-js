@@ -19,7 +19,10 @@ export interface MonitoringOverview {
     generated_at: string;
     instance: {
         version: string;
-        go_version: string;
+        /** Compiler of the server, such as `rustc 1.91.1` (ElysianDB 0.4.0 and later). */
+        rust_version?: string;
+        /** Go version of the server (ElysianDB 0.3.x and earlier). */
+        go_version?: string;
         engine: string;
         started_at: string;
         uptime_seconds: number;

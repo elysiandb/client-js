@@ -9,7 +9,7 @@
 
 > 本文是译文。请以英文版 [README](../../README.md) 为准，英文版的内容可能比本译文更新。
 
-[ElysianDB](https://github.com/elysiandb/elysiandb) 的官方客户端。ElysianDB 是一个单二进制文件的后端，能把 JSON 直接变成 REST API。本客户端覆盖了 ElysianDB 0.2.3 的全部 HTTP API：
+[ElysianDB](https://github.com/elysiandb/elysiandb) 的官方客户端。ElysianDB 是一个单二进制文件的后端，能把 JSON 直接变成 REST API。本客户端覆盖了 ElysianDB 0.4 的全部 HTTP API（参见[兼容性](#兼容性)）：
 
 - **文档**：类型化 CRUD、批量写入、过滤、搜索、排序、分页、字段投影、关联展开、异步迭代
 - **Query API**：`and` / `or` 过滤树，以及多字段排序
@@ -43,6 +43,7 @@
 - [请求钩子与原始请求](#请求钩子与原始请求)
 - [运行时与浏览器](#运行时与浏览器)
 - [API 参考](#api-参考)
+- [兼容性](#兼容性)
 - [从 0.0.x 迁移](#从-00x-迁移)
 - [开发](#开发)
 
@@ -124,8 +125,10 @@ const db2 = new ElysianDB({ url: "http://localhost:8089", auth: { token: "my-sec
 用 `health()` 检查服务器是否正常运行。它从不抛出异常，也不需要凭据：
 
 ```ts
-const { ok, version } = await db.health(); // { ok: true, status: 200, version: "0.2.3" }
+const { ok, version } = await db.health(); // { ok: true, status: 200, version: "0.4.0" }
 ```
+
+ElysianDB 在启动完成之前会返回 `503`：此时 `health()` 返回 `{ ok: false, status: 503 }`。
 
 ## 身份验证
 
@@ -239,9 +242,9 @@ await books.count({ filter: { year: { lt: 1970 } } });  // matching documents
 
 ## 名称、ID 与键
 
-实体名称、文档 ID、键、用户名和钩子 ID 都会出现在 URL 路径中，而 ElysianDB 0.2.3 对它们的解码并不一致：需要百分号编码的键或 ID 可能写得进去，却读不回来。因此客户端只接受由字母（`A-Z`、`a-z`）、数字以及 `- _ . ! ~ * ' ( ) : @ $ & + , ; =` 组成的值，其他字符一律抛出 `TypeError`，例如空格、带重音的字母、`/`、`?`、`#` 或 `%`。`create()` 和 `createMany()` 也会以同样的方式检查你传入的 `id`，确保每个文档都能读回。
+实体名称、文档 ID、键、用户名和钩子 ID 都会出现在 URL 路径中，而 ElysianDB 对它们的解码并不一致：需要百分号编码的键或 ID 可能写得进去，却读不回来。因此客户端只接受由字母（`A-Z`、`a-z`）、数字以及 `- _ . ! ~ * ' ( ) : @ $ & + , ; =` 组成的值，其他字符一律抛出 `TypeError`，例如空格、带重音的字母、`/`、`?`、`#` 或 `%`。`create()` 和 `createMany()` 也会以同样的方式检查你传入的 `id`，确保每个文档都能读回。
 
-实体名称的限制更严格：只能包含字母、数字、`_`、`-` 和 `.`，且不能以 `.` 开头。ElysianDB 会用实体名称构造存储键和匹配模式，因此 `:` 或 `*` 会波及其他实体：`db.entity("books:id").deleteAll()` 会删除所有书。由其他客户端以其他名称创建的实体类型，仍可通过 `db.request()` 和 `encodeURIComponent()` 访问。
+实体名称的限制更严格：只能包含字母、数字、`_`、`-` 和 `.`，且不能以 `.` 开头。ElysianDB 0.2 曾用实体名称构造存储键和匹配模式，因此 `:` 或 `*` 会波及其他实体；客户端保留了这条规则，以确保名称在所有版本上都有效。由其他客户端以其他名称创建的实体类型，仍可通过 `db.request()` 和 `encodeURIComponent()` 访问。
 
 有些值会被拒绝，原因是 ElysianDB 会把它们路由到别处，或者 `fetch` 会把它们从 URL 中移除：
 
@@ -252,8 +255,6 @@ await books.count({ filter: { year: { lt: 1970 } } });  // matching documents
 | `count`、`schema` | `get()`、`update()` 和 `create()` 中的文档 ID | `GET /api/books/count` 用于统计书的数量。`exists()` 和 `delete()` 仍然接受这两个值。 |
 | `mget` | `kv.get()` 和 `kv.set()` 中的键 | `GET /kv/mget` 是 `mget()` 的路由。 |
 | 包含 `*` 的键 | `kv.get()` 和 `kv.set()` 中的键 | `*` 是 `mget()` 和 `delete()` 的通配符。 |
-
-此外，ElysianDB 0.2.3 在比较某些存储键时不区分大小写：不要使用仅大小写不同的实体名称，因为对 `Books` 调用 `deleteAll()` 会删除 `books` 的索引。
 
 客户端也从不跟随 HTTP 重定向，因为重定向会把请求连同凭据一起重放到另一个 URL 上。遇到重定向时，请求会以 `ElysianDBError` 失败，错误中会给出新的地址：如果遇到这种情况，请检查服务器的 URL。
 
@@ -316,7 +317,7 @@ for await (const book of books.iterate({ pageSize: 500, sort: { year: "asc" } })
 
 遍历会变化的数据时，请指定 `sort`，以保证分页稳定。
 
-`iterate()` 和 `listAll()` 遇到第一个短于 `pageSize` 的页面，并且 `count()` 确认所有文档都已读取后，才会停止。在 `user` 模式下，对于授予了 `owning_read` 但未授予 `read` 的 ACL，ElysianDB 0.2.3 会在 `limit` 和 `offset` 之后才应用它，因此在到达末尾之前，某一页可能偏短甚至为空：这时客户端会用一个请求取回剩余的文档。`list()` 和 `first()` 无法检测到这种情况，因此可能返回少于 `limit` 条的文档。
+`iterate()` 和 `listAll()` 遇到第一个短于 `pageSize` 的页面，并且 `count()` 确认所有文档都已读取后，才会停止。在 `user` 模式下，对于授予了 `owning_read` 但未授予 `read` 的 ACL，ElysianDB 会在 `limit` 和 `offset` 之后才应用它，因此在到达末尾之前，某一页可能偏短甚至为空：这时客户端会用一个请求取回剩余的文档。`list()` 和 `first()` 无法检测到这种情况，因此可能返回少于 `limit` 条的文档。
 
 ## Query API
 
@@ -369,7 +370,7 @@ const authorId = await db.transaction(async (tx) => {
 
 - 操作会在服务器端排队，并在提交时应用，要么全部生效，要么全部不生效。如果出现模式错误，或者要更新的文档在提交时已不存在，整个提交都会以 `400` 错误被拒绝。
 - `tx.create()` 返回带 `id` 的文档（未提供 `id` 时由客户端生成），这样事务中的其他文档就能链接到它（`{ "@entity": "authors", id: author.id }`）。
-- `tx.update()` 只适用于已经存储的文档：ElysianDB 0.2.3 会在更新入队时检查文档是否存在，因此更新同一事务中创建的文档会以 `400` 错误失败。这种情况下，请直接在 `tx.create()` 中写入所有字段。
+- `tx.update()` 只适用于已经存储的文档：ElysianDB 会在更新入队时检查文档是否存在，因此更新同一事务中创建的文档会以 `400` 错误失败。这种情况下，请直接在 `tx.create()` 中写入所有字段。
 - 提交之前，排队中的操作无法被读取，无论是本客户端还是其他客户端。
 - 操作和提交都不会重试，以免有内容被重复入队或重复应用。ElysianDB 不会让未结束的事务过期：如果提交没有收到响应（网络错误、超时或中止），客户端会回滚该事务。不过，如果提交已经到达 ElysianDB，它仍可能已被应用，所以重试之前请先确认。
 - `tx.entity<T>("books")` 为单个实体提供带类型的 `create`、`update` 和 `delete`。
@@ -480,7 +481,7 @@ await db.hooks.delete("books", hook.id);
 在 `user` 模式下，这些调用需要管理员权限。
 
 ```ts
-await db.admin.stats();   // { keys_count: 1203, uptime_seconds: 3605, version: "0.2.3", ... } (requires stats.enabled)
+await db.admin.stats();   // { keys_count: 1203, uptime_seconds: 3605, version: "0.4.0", ... } (requires stats.enabled)
 await db.admin.config();  // configuration, secrets redacted
 await db.admin.save();    // flush to disk now
 await db.admin.reset();   // delete every KV key (documents are kept)
@@ -506,7 +507,7 @@ const summary = await db.admin.restore(await readFile(filename)); // { status, e
 
 `filename` 由服务器返回，但它始终是一个不含目录的普通 `.tar.gz` 文件名：其他任何名称都会被客户端替换为 `elysiandb-backup.tar.gz`，这样服务器就无法决定你把文件写到哪里。
 
-恢复会替换全部数据，并结束所有会话，包括当前会话。HTTP API 只接受最大 4 MB 的归档：更大的实例请使用 `elysiandb backup` 和 `elysiandb restore`。归档中包含密码哈希：请像对待数据目录一样妥善保管。
+恢复会替换全部数据，并结束所有会话，包括当前会话。没有大小限制：ElysianDB 以流式方式传输备份，恢复时也会边接收边读取归档。请为大型备份和恢复设置更长的 `timeout`，它涵盖整个传输过程。归档中包含密码哈希：请像对待数据目录一样妥善保管。
 
 ## 监控
 
@@ -558,9 +559,9 @@ try {
 | `data` | 解析后的响应体 |
 | `validationErrors` | `{ field, message, index?, entity?, id? }[]`，用于被拒绝的写入、批量写入（`index`）和导入 |
 | `requestId` | 响应的 `X-Request-Id` |
-| `retryAfter` | 收到 `429` 后需要等待的秒数 |
+| `retryAfter` | 收到 `429`、`503` 或 `507` 后需要等待的秒数 |
 | `method`、`url` | 失败的请求 |
-| `isNotFound`、`isUnauthorized`、`isForbidden`、`isConflict`、`isRateLimited`、`isValidationError`、`isAbort` | 快捷判断属性 |
+| `isNotFound`、`isUnauthorized`、`isForbidden`、`isConflict`、`isRateLimited`、`isUnavailable`（`503`）、`isStorageFull`（`507`）、`isValidationError`、`isAbort` | 快捷判断属性 |
 
 ## 超时、重试与取消
 
@@ -576,7 +577,9 @@ controller.abort(); // the call rejects with code "ABORTED"
 
 单次调用的选项有 `signal`、`timeout`、`retries`、`requestId`（作为 `X-Request-Id` 发送）和 `headers`。
 
-只有幂等请求（`GET`、`PUT`、`DELETE`）会在网络错误或 `429`、`502`、`503`、`504` 响应之后重试。`POST` 请求（例如 `create()`、登录或提交）以及事务中的操作永远不会重试。
+只有幂等请求（`GET`、`PUT`、`DELETE`）会在网络错误或 `429`、`502`、`503`、`504` 响应之后重试。`POST` 请求（例如 `create()`、登录或提交）以及事务中的操作永远不会重试。Query API（`query()`、`queryCount()` 和 `db.query()`）是例外：它只读取数据，而 ElysianDB 在高负载下可能返回 `503 server busy`。
+
+当磁盘已满（`507`，不会重试）或出现故障（`503`）时，ElysianDB 会拒绝写入，并返回 `Retry-After: 30`：此时重试的写入会等待 30 秒。
 
 ## 请求钩子与原始请求
 
@@ -607,7 +610,7 @@ headers.get("X-Elysian-Cache"); // "HIT" or "MISS"
 - 只有当某个源被列入 `server.http.cors.allowedOrigins` 时，浏览器才能从该源跨域调用 ElysianDB。
 - 不要把管理员凭据或实例令牌下发到浏览器。
 
-ElysianDB 0.2.3 对跨源页面有以下限制：
+ElysianDB 对跨源页面有以下限制：
 
 - 不允许使用 `X-Request-Id` 请求头：带 `requestId` 选项的请求无法通过 CORS 预检。在浏览器中跨源调用时，请不要设置 `requestId`。
 - 响应头不会暴露给页面：`health().version` 为 `null`，`error.requestId` 和 `error.retryAfter` 为 `undefined`，`send()` 只能看到 `Content-Type` 等 CORS 安全列表中的响应头，`admin.backup()` 会把文件命名为 `elysiandb-backup.tar.gz`。
@@ -660,6 +663,16 @@ ElysianDB 0.2.3 对跨源页面有以下限制：
 | `logs()` / `exportLogs()` / `getLogLevel()` / `setLogLevel()` | `/monitoring/logs...` |
 | `metrics()` | `/metrics` |
 
+## 兼容性
+
+客户端的版本跟随 ElysianDB 的版本：客户端 `0.X.y` 适用于 ElysianDB `0.X`，`y` 用于计数客户端自身的发布。CI 会针对每个受测的 ElysianDB 版本运行集成测试。
+
+| 客户端 | ElysianDB | CI 中测试的版本 |
+| --- | --- | --- |
+| 0.4.x | 0.4.x（Rust） | 0.4.0，以及 0.3.0（最后一个 Go 版本） |
+
+客户端 0.4 不支持 ElysianDB 0.2.x。客户端的 0.0.x 版本早于这一版本规则。
+
 ## 从 0.0.x 迁移
 
 大部分代码无需修改即可继续使用。变更如下：
@@ -691,9 +704,9 @@ scripts/start-test-servers.sh /path/to/elysiandb
 npm run test:integration:local
 ```
 
-CI 会从源码构建 ElysianDB 0.2.3，并运行这两套测试。
+CI 会针对 ElysianDB 0.4.0（使用其已发布镜像中的二进制文件）和 0.3.0（从源码构建）运行这两套测试。
 
-发布时，在最新的 `main` 分支上运行 `make release`（或 `make release VERSION=minor`）：它会升级版本号并推送标签，随后 Release 工作流会运行 CI，并把包连同来源证明（provenance）一起发布到 npm。该工作流需要 `NPM_TOKEN` 这个 secret。
+发布时，先在一个 pull request 中设置版本号（`npm version 0.4.1 --no-git-tag-version` 以及 `CHANGELOG.md` 中的条目）并合并，然后在最新的 `main` 分支上运行 `make release`，它会创建并推送标签 `v0.4.1`：随后 Release 工作流会运行 CI，并通过 npm 可信发布（trusted publishing）把包连同来源证明（provenance）一起发布到 npm（不保存任何令牌）。
 
 `README.md` 是权威的参考文档：请先修改它，再更新 [`docs/i18n`](./) 中的译文，这些译文不会发布到 npm。`CHANGELOG.md` 只有英文版。
 

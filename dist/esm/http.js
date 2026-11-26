@@ -1,5 +1,7 @@
 import { describeErrorBody, ElysianDBError } from "./errors.js";
 const IDEMPOTENT_METHODS = new Set(["GET", "HEAD", "PUT", "DELETE"]);
+// ElysianDB treats `POST /api/query` as a read: since 0.3.0 it can answer `503 server busy` with `Retry-After`.
+const READ_ONLY_POSTS = new Set(["/api/query"]);
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_RETRY_DELAY_MS = 30000;
@@ -11,6 +13,8 @@ const STATUS_HINTS = {
     409: "conflict",
     429: "too many requests",
     500: "internal server error",
+    503: "service unavailable",
+    507: "insufficient storage, the disk of the server is full",
 };
 export class HttpClient {
     constructor(options) {
@@ -28,7 +32,7 @@ export class HttpClient {
         var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q;
         const url = this.buildUrl(path, options.query);
         const retries = Math.max(0, (_b = (_a = options.retries) !== null && _a !== void 0 ? _a : this.options.retries) !== null && _b !== void 0 ? _b : 0);
-        const canRetry = IDEMPOTENT_METHODS.has(method);
+        const canRetry = IDEMPOTENT_METHODS.has(method) || (method === "POST" && READ_ONLY_POSTS.has(path));
         const timeout = (_c = options.timeout) !== null && _c !== void 0 ? _c : this.options.timeout;
         const fetchImpl = (_d = this.options.fetch) !== null && _d !== void 0 ? _d : globalThis.fetch;
         if (typeof fetchImpl !== "function") {
@@ -209,7 +213,7 @@ function parseRetryAfter(value) {
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
-/** Characters of a path segment that ElysianDB 0.2.3 reads back as they were written. */
+/** Characters of a path segment that ElysianDB reads back as they were written. */
 const PATH_SEGMENT = /^[A-Za-z0-9\-_.!~*'():@$&+,;=]+$/;
 /** Punctuation of `PATH_SEGMENT`, for error messages. */
 const PATH_SEGMENT_PUNCTUATION = "- _ . ! ~ * ' ( ) : @ $ & + , ; =";
@@ -218,7 +222,7 @@ const PATH_SEGMENT_PUNCTUATION = "- _ . ! ~ * ' ( ) : @ $ & + , ; =";
  *
  * - `.` and `..` are rejected: `fetch` removes them from URLs, so `DELETE /api/books/.` would become
  *   `DELETE /api/books/`, which deletes the whole entity.
- * - Characters that need percent-encoding are rejected: ElysianDB 0.2.3 decodes some path parameters and not
+ * - Characters that need percent-encoding are rejected: ElysianDB decodes some path parameters and not
  *   others, so the value could be written but not read back (`PUT /kv/a%20b` stores the key `a%20b`).
  */
 export function segment(value, label) {
@@ -229,7 +233,7 @@ export function segment(value, label) {
         throw new TypeError(`ElysianDB: invalid ${label} "${value}": fetch removes "." and ".." from URL paths`);
     }
     if (!PATH_SEGMENT.test(value)) {
-        throw new TypeError(`ElysianDB: invalid ${label} ${JSON.stringify(value)}: ElysianDB 0.2.3 only reads back path segments ` +
+        throw new TypeError(`ElysianDB: invalid ${label} ${JSON.stringify(value)}: ElysianDB only reads back path segments ` +
             `made of letters, digits and ${PATH_SEGMENT_PUNCTUATION}`);
     }
     return value;

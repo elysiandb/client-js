@@ -52,7 +52,7 @@ export class Transaction {
     }
 
     /**
-     * Queues a partial update. The document must already be stored: ElysianDB 0.2.3 rejects the update
+     * Queues a partial update. The document must already be stored: ElysianDB rejects the update
      * of a document created in the same transaction (`400`). The commit fails if the document no longer
      * exists at that point.
      */

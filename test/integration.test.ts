@@ -296,6 +296,7 @@ describe("integration: no authentication", { skip: !URL_NONE }, () => {
         assert.ok(["healthy", "warning", "critical"].includes(overview.status.level));
         assert.ok(Array.isArray(overview.status.problems));
         assert.match(overview.instance.version, /^\d+\.\d+\.\d+/);
+        assert.equal(typeof (overview.instance.rust_version ?? overview.instance.go_version), "string");
         assert.ok(await db.monitoring.series({ range: "15m" }));
         assert.ok(await db.monitoring.details());
 
@@ -328,7 +329,7 @@ describe("integration: no authentication", { skip: !URL_NONE }, () => {
         await assert.rejects(db.kv.set(`${name("kv")}:*`, "v"), /set\(\) writes one key/);
         assert.equal(await books.count(), before);
 
-        // ElysianDB builds storage keys from entity names: "<books>:id" would reach the documents of <books>.
+        // ElysianDB 0.2 built storage keys from entity names: "<books>:id" reached the documents of <books>.
         assert.throws(() => db.entity(`${BOOKS}:id`), /invalid entity name/);
         assert.throws(() => db.entity(`${BOOKS.slice(0, -1)}*`), /invalid entity name/);
         await assert.rejects(db.hooks.list(`${BOOKS}:id`), /invalid entity name/);
@@ -534,7 +535,7 @@ describe("integration: user mode", { skip: !URL_USER }, () => {
     });
 
     it("iterates over every document when an ACL only grants owning_read", async () => {
-        // ElysianDB 0.2.3 applies this ACL after limit and offset, so pages are short before the end.
+        // ElysianDB applies this ACL after limit and offset, so pages are short before the end.
         const BOB = name("bob");
         const SHARED = name("shared");
         await db.users.create({ username: BOB, password: "bob-password", role: "admin" });

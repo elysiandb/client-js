@@ -88,8 +88,8 @@ describe("authentication", () => {
     });
 
     it("never sends credentials to /health", async () => {
-        const { db, calls } = client([empty(200, { "X-Elysian-Version": "0.2.3" })], { auth: { token: "t" } });
-        assert.deepEqual(await db.health(), { ok: true, status: 200, version: "0.2.3" });
+        const { db, calls } = client([empty(200, { "X-Elysian-Version": "0.4.0" })], { auth: { token: "t" } });
+        assert.deepEqual(await db.health(), { ok: true, status: 200, version: "0.4.0" });
         assert.equal(calls[0].headers.authorization, undefined);
     });
 });
@@ -184,7 +184,7 @@ describe("entity routes", () => {
         assert.equal(calls.length, 0);
     });
 
-    it("rejects values that ElysianDB 0.2.3 cannot read back from a path", async () => {
+    it("rejects values that ElysianDB cannot read back from a path", async () => {
         const { db, calls } = client([]);
         const books = db.entity("books");
         for (const value of ["a b", "é", "a%20b", "a/b", "a?b", "a#b", "a\"b", "a\nb", "a<b", "a[b]"]) {
@@ -201,7 +201,7 @@ describe("entity routes", () => {
         assert.equal(calls.length, 0);
     });
 
-    it("rejects entity names that would reach the storage keys of other entities", async () => {
+    it("rejects entity names with characters other than letters, digits, _, - and .", async () => {
         const { db, calls } = client([json({ transaction_id: "tx1" })]);
         for (const name of ["books:id", "books*", "*", ":", "b@oks", "b+oks", "b$", ".hidden", "a,b", "a;b", "a=b", "(a)", "a!", "a~", "a'b"]) {
             assert.throws(() => db.entity(name), /invalid entity name .*: use letters, digits, "_", "-" and "\."/, name);
@@ -348,7 +348,7 @@ describe("entity routes", () => {
     });
 
     it("keeps iterating when ACLs make a page short before the end", async () => {
-        // In user mode, ElysianDB 0.2.3 applies an `owning_read` ACL after limit and offset.
+        // In user mode, ElysianDB applies an `owning_read` ACL after limit and offset.
         const { db, calls } = client([json([]), json({ count: 2 }), json([{ id: "d4" }, { id: "d5" }])]);
         const all = await db.entity("notes").listAll({ pageSize: 2, filter: { n: { gte: 0 } }, search: "x" });
 
@@ -556,11 +556,53 @@ describe("retries", () => {
         assert.equal(calls.length, 2);
     });
 
-    it("never retries POST requests", async () => {
+    it("never retries POST requests that write", async () => {
         const { fetch, calls } = mockFetch(json({}, 503), json({ id: "1" }));
         const db = createClient("http://db.test", { fetch, retries: 3, retryDelay: 1 });
         await assert.rejects(db.entity("b").create({}), (error: ElysianDBError) => error.status === 503);
         assert.equal(calls.length, 1);
+    });
+
+    it("retries the Query API when the server is busy", async () => {
+        const busy = () => json({ error: "server busy" }, 503, { "Retry-After": "0" });
+        const { fetch, calls } = mockFetch(busy(), json([{ id: "1" }]), busy(), json({ count: 4 }), busy(), json([]));
+        const db = createClient("http://db.test", { fetch, retries: 1, retryDelay: 10_000 });
+
+        assert.deepEqual(await db.entity("b").query({ filter: { year: { gt: 1 } } }), [{ id: "1" }]);
+        assert.equal(await db.entity("b").queryCount(), 4);
+        assert.deepEqual(await db.query({ entity: "b" }), []);
+        assert.equal(calls.length, 6);
+        assert.ok(calls.every((call) => call.method === "POST" && call.url.pathname === "/api/query"));
+    });
+
+    it("does not retry the Query API by default", async () => {
+        const { fetch, calls } = mockFetch(json({ error: "server busy" }, 503, { "Retry-After": "1" }));
+        const db = createClient("http://db.test", { fetch });
+        await assert.rejects(db.entity("b").query(), (error: ElysianDBError) => {
+            assert.equal(error.isUnavailable, true);
+            assert.equal(error.retryAfter, 1);
+            assert.match(error.message, /failed with status 503: server busy/);
+            return true;
+        });
+        assert.equal(calls.length, 1);
+    });
+
+    it("reports a full disk without retrying", async () => {
+        const { fetch, calls } = mockFetch(json({ error: "disk full" }, 507, { "Retry-After": "30" }));
+        const db = createClient("http://db.test", { fetch, retries: 3, retryDelay: 1 });
+        await assert.rejects(db.kv.set("k", "v"), (error: ElysianDBError) => {
+            assert.equal(error.isStorageFull, true);
+            assert.equal(error.retryAfter, 30);
+            assert.match(error.message, /PUT \/kv\/k failed with status 507: disk full/);
+            return true;
+        });
+        assert.equal(calls.length, 1);
+    });
+
+    it("explains a 507 without a body", async () => {
+        const { fetch } = mockFetch(new Response(null, { status: 507 }));
+        const db = createClient("http://db.test", { fetch });
+        await assert.rejects(db.kv.set("k", "v"), /failed with status 507: insufficient storage, the disk of the server is full/);
     });
 });
 
@@ -852,8 +894,8 @@ describe("key-value store", () => {
 
 describe("admin", () => {
     it("parses stats as numbers", async () => {
-        const { db } = client([json({ keys_count: "12", hits: "3", version: "0.2.3" })]);
-        assert.deepEqual(await db.admin.stats(), { keys_count: 12, hits: 3, version: "0.2.3" });
+        const { db } = client([json({ keys_count: "12", hits: "3", version: "0.4.0" })]);
+        assert.deepEqual(await db.admin.stats(), { keys_count: 12, hits: 3, version: "0.4.0" });
     });
 
     it("downloads backups with their file name", async () => {

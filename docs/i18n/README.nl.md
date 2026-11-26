@@ -9,7 +9,7 @@
 
 > Dit is een vertaling. De [Engelse README](../../README.md) is de referentie en kan recenter zijn.
 
-De officiële client voor [ElysianDB](https://github.com/elysiandb/elysiandb), de backend in één binary die JSON omzet in een REST API. Hij dekt de volledige HTTP API van ElysianDB 0.2.3:
+De officiële client voor [ElysianDB](https://github.com/elysiandb/elysiandb), de backend in één binary die JSON omzet in een REST API. Hij dekt de volledige HTTP API van ElysianDB 0.4 (zie [Compatibiliteit](#compatibiliteit)):
 
 - **Documenten**: getypeerde CRUD, batch-writes, filters, zoeken, sorteren, paginering, projecties, includes, asynchrone iteratie
 - **Query API**: filterbomen met `and` / `or` en sortering op meerdere velden
@@ -43,6 +43,7 @@ De client heeft geen dependencies, levert ES-modules, CommonJS en TypeScript-typ
 - [Request-hooks en ruwe requests](#request-hooks-en-ruwe-requests)
 - [Runtimes en browsers](#runtimes-en-browsers)
 - [API-referentie](#api-referentie)
+- [Compatibiliteit](#compatibiliteit)
 - [Migreren vanaf 0.0.x](#migreren-vanaf-00x)
 - [Ontwikkeling](#ontwikkeling)
 
@@ -124,8 +125,10 @@ const db2 = new ElysianDB({ url: "http://localhost:8089", auth: { token: "my-sec
 Controleer met `health()` of de server draait. Deze methode gooit nooit een fout en heeft geen inloggegevens nodig:
 
 ```ts
-const { ok, version } = await db.health(); // { ok: true, status: 200, version: "0.2.3" }
+const { ok, version } = await db.health(); // { ok: true, status: 200, version: "0.4.0" }
 ```
+
+ElysianDB antwoordt met `503` totdat het klaar is met opstarten: `health()` geeft dan `{ ok: false, status: 503 }` terug.
 
 ## Authenticatie
 
@@ -239,9 +242,9 @@ await books.count({ filter: { year: { lt: 1970 } } });  // matching documents
 
 ## Namen, ID's en sleutels
 
-Entiteitsnamen, document-ID's, sleutels, gebruikersnamen en hook-ID's komen in URL-paden terecht, en ElysianDB 0.2.3 decodeert ze niet consequent: een sleutel of een ID waarvoor percent-encoding nodig is, kan wel worden weggeschreven maar niet meer worden teruggelezen. De client accepteert alleen waarden die bestaan uit letters (`A-Z`, `a-z`), cijfers en `- _ . ! ~ * ' ( ) : @ $ & + , ; =`, en gooit een `TypeError` voor al het andere, zoals spaties, letters met accenten, `/`, `?`, `#` of `%`. `create()` en `createMany()` controleren het `id` dat je meegeeft op dezelfde manier, zodat elk document ook weer teruggelezen kan worden.
+Entiteitsnamen, document-ID's, sleutels, gebruikersnamen en hook-ID's komen in URL-paden terecht, en ElysianDB decodeert ze niet consequent: een sleutel of een ID waarvoor percent-encoding nodig is, kan wel worden weggeschreven maar niet meer worden teruggelezen. De client accepteert alleen waarden die bestaan uit letters (`A-Z`, `a-z`), cijfers en `- _ . ! ~ * ' ( ) : @ $ & + , ; =`, en gooit een `TypeError` voor al het andere, zoals spaties, letters met accenten, `/`, `?`, `#` of `%`. `create()` en `createMany()` controleren het `id` dat je meegeeft op dezelfde manier, zodat elk document ook weer teruggelezen kan worden.
 
-Voor entiteitsnamen gelden strengere regels: letters, cijfers, `_`, `-` en `.`, zonder `.` aan het begin. ElysianDB bouwt er zijn opslagsleutels en patronen mee op, dus `:` of `*` zouden bij andere entiteiten uitkomen: `db.entity("books:id").deleteAll()` zou alle boeken verwijderen. Entiteitstypen die een andere client met andere namen heeft aangemaakt, blijven bereikbaar met `db.request()` en `encodeURIComponent()`.
+Voor entiteitsnamen gelden strengere regels: letters, cijfers, `_`, `-` en `.`, zonder `.` aan het begin. ElysianDB 0.2 bouwde er zijn opslagsleutels en patronen mee op, dus `:` of `*` kwamen bij andere entiteiten uit, en de client houdt deze regel aan zodat namen in elke versie geldig blijven. Entiteitstypen die een andere client met andere namen heeft aangemaakt, blijven bereikbaar met `db.request()` en `encodeURIComponent()`.
 
 Sommige waarden worden geweigerd omdat ElysianDB ze naar een andere route stuurt, of omdat `fetch` ze uit URL's verwijdert:
 
@@ -252,8 +255,6 @@ Sommige waarden worden geweigerd omdat ElysianDB ze naar een andere route stuurt
 | `count`, `schema` | Document-ID in `get()`, `update()` en `create()` | `GET /api/books/count` telt de boeken. `exists()` en `delete()` accepteren ze wel. |
 | `mget` | Sleutel in `kv.get()` en `kv.set()` | `GET /kv/mget` is de route van `mget()`. |
 | Sleutels met `*` | Sleutel in `kv.get()` en `kv.set()` | `*` is de wildcard van `mget()` en `delete()`. |
-
-ElysianDB 0.2.3 vergelijkt sommige opslagsleutels bovendien hoofdletterongevoelig: gebruik geen entiteitsnamen die alleen in hoofd- en kleine letters verschillen, want `deleteAll()` op `Books` gooit de indexen van `books` weg.
 
 De client volgt ook nooit HTTP-redirects, omdat een redirect de request, inclusief inloggegevens, opnieuw naar een andere URL zou sturen. Een redirect mislukt met een `ElysianDBError` waarin de nieuwe locatie staat: krijg je er een, controleer dan de URL van de server.
 
@@ -316,7 +317,7 @@ for await (const book of books.iterate({ pageSize: 500, sort: { year: "asc" } })
 
 Gebruik een `sort` als je over data itereert die verandert, zodat de pagina's stabiel blijven.
 
-`iterate()` en `listAll()` stoppen bij de eerste pagina die korter is dan `pageSize`, zodra `count()` bevestigt dat alle documenten gelezen zijn. In `user`-modus past ElysianDB 0.2.3 een ACL die wel `owning_read` maar geen `read` toekent pas toe na `limit` en `offset`, waardoor een pagina vóór het einde te kort of zelfs leeg kan zijn: de client haalt de resterende documenten dan in één request op. `list()` en `first()` kunnen dat niet detecteren en geven in dat geval mogelijk minder documenten terug dan `limit`.
+`iterate()` en `listAll()` stoppen bij de eerste pagina die korter is dan `pageSize`, zodra `count()` bevestigt dat alle documenten gelezen zijn. In `user`-modus past ElysianDB een ACL die wel `owning_read` maar geen `read` toekent pas toe na `limit` en `offset`, waardoor een pagina vóór het einde te kort of zelfs leeg kan zijn: de client haalt de resterende documenten dan in één request op. `list()` en `first()` kunnen dat niet detecteren en geven in dat geval mogelijk minder documenten terug dan `limit`.
 
 ## Query API
 
@@ -369,7 +370,7 @@ const authorId = await db.transaction(async (tx) => {
 
 - Bewerkingen worden op de server in een wachtrij gezet en bij de commit toegepast: alles of niets. Een schemafout, of een update van een document dat op dat moment niet meer bestaat, laat de hele commit mislukken met een `400`-fout.
 - `tx.create()` geeft het document terug met zijn `id`, dat de client genereert als het ontbreekt, zodat andere documenten in de transactie ernaar kunnen linken (`{ "@entity": "authors", id: author.id }`).
-- `tx.update()` werkt alleen op documenten die al zijn opgeslagen: ElysianDB 0.2.3 controleert of het document bestaat op het moment dat de update in de wachtrij komt, dus een update van een document dat in dezelfde transactie is aangemaakt mislukt met een `400`-fout. Zet in dat geval alle velden direct in `tx.create()`.
+- `tx.update()` werkt alleen op documenten die al zijn opgeslagen: ElysianDB controleert of het document bestaat op het moment dat de update in de wachtrij komt, dus een update van een document dat in dezelfde transactie is aangemaakt mislukt met een `400`-fout. Zet in dat geval alle velden direct in `tx.create()`.
 - Bewerkingen in de wachtrij kunnen vóór de commit niet worden teruggelezen, niet door deze client en ook niet door een andere.
 - Bewerkingen en commits worden nooit opnieuw geprobeerd, zodat niets dubbel in de wachtrij komt of dubbel wordt toegepast. ElysianDB laat open transacties nooit verlopen: krijgt een commit geen antwoord (netwerkfout, time-out of afbreking), dan draait de client de transactie terug. Heeft de commit ElysianDB wel bereikt, dan kan hij toch zijn toegepast: controleer dat dus voordat je het opnieuw probeert.
 - `tx.entity<T>("books")` biedt getypeerde `create`, `update` en `delete` voor één entiteit.
@@ -480,7 +481,7 @@ await db.hooks.delete("books", hook.id);
 In `user`-modus vereisen deze aanroepen een admin.
 
 ```ts
-await db.admin.stats();   // { keys_count: 1203, uptime_seconds: 3605, version: "0.2.3", ... } (requires stats.enabled)
+await db.admin.stats();   // { keys_count: 1203, uptime_seconds: 3605, version: "0.4.0", ... } (requires stats.enabled)
 await db.admin.config();  // configuration, secrets redacted
 await db.admin.save();    // flush to disk now
 await db.admin.reset();   // delete every KV key (documents are kept)
@@ -506,7 +507,7 @@ const summary = await db.admin.restore(await readFile(filename)); // { status, e
 
 `filename` komt van de server, maar is altijd een gewone bestandsnaam op `.tar.gz` zonder map: de client vervangt elke andere naam door `elysiandb-backup.tar.gz`, zodat de server niet kan bepalen waar je naartoe schrijft.
 
-Een restore vervangt alle data en beëindigt alle sessies, ook de huidige. De HTTP API accepteert archieven tot 4 MB: gebruik `elysiandb backup` en `elysiandb restore` voor grotere instanties. Archieven bevatten wachtwoordhashes: bewaar ze net zo zorgvuldig als de datamap.
+Een restore vervangt alle data en beëindigt alle sessies, ook de huidige. Er is geen groottelimiet: ElysianDB streamt de back-up en leest het archief van een restore terwijl het binnenkomt. Geef grote back-ups en restores een langere `timeout`, want die geldt voor de hele overdracht. Archieven bevatten wachtwoordhashes: bewaar ze net zo zorgvuldig als de datamap.
 
 ## Monitoring
 
@@ -558,9 +559,9 @@ try {
 | `data` | Geparste response-body |
 | `validationErrors` | `{ field, message, index?, entity?, id? }[]` voor geweigerde schrijfacties, batch-writes (`index`) en imports |
 | `requestId` | `X-Request-Id` van het antwoord |
-| `retryAfter` | Aantal seconden wachten, na een `429` |
+| `retryAfter` | Aantal seconden wachten, na een `429`, `503` of `507` |
 | `method`, `url` | De mislukte request |
-| `isNotFound`, `isUnauthorized`, `isForbidden`, `isConflict`, `isRateLimited`, `isValidationError`, `isAbort` | Snelle controles |
+| `isNotFound`, `isUnauthorized`, `isForbidden`, `isConflict`, `isRateLimited`, `isUnavailable` (`503`), `isStorageFull` (`507`), `isValidationError`, `isAbort` | Snelle controles |
 
 ## Time-outs, herhaalpogingen en annulering
 
@@ -576,7 +577,9 @@ controller.abort(); // the call rejects with code "ABORTED"
 
 De opties per aanroep zijn `signal`, `timeout`, `retries`, `requestId` (verstuurd als `X-Request-Id`) en `headers`.
 
-Alleen idempotente requests (`GET`, `PUT`, `DELETE`) worden opnieuw geprobeerd, na een netwerkfout of een antwoord met status `429`, `502`, `503` of `504`. `POST`-requests, zoals `create()`, een login of een commit, en de bewerkingen van een transactie worden nooit opnieuw geprobeerd.
+Alleen idempotente requests (`GET`, `PUT`, `DELETE`) worden opnieuw geprobeerd, na een netwerkfout of een antwoord met status `429`, `502`, `503` of `504`. `POST`-requests, zoals `create()`, een login of een commit, en de bewerkingen van een transactie worden nooit opnieuw geprobeerd. De Query API (`query()`, `queryCount()` en `db.query()`) is de uitzondering: die leest alleen, en ElysianDB kan er onder belasting met `503 server busy` op antwoorden.
+
+ElysianDB weigert schrijfacties als de schijf vol is (`507`, niet opnieuw geprobeerd) of defect raakt (`503`), met `Retry-After: 30`: een schrijfactie die opnieuw wordt geprobeerd, wacht dan 30 seconden.
 
 ## Request-hooks en ruwe requests
 
@@ -607,7 +610,7 @@ headers.get("X-Elysian-Cache"); // "HIT" or "MISS"
 - Browsers kunnen ElysianDB alleen vanaf een andere origin aanroepen als die origin in `server.http.cors.allowedOrigins` staat.
 - Lever nooit admin-inloggegevens of het token van de instantie uit aan browsers.
 
-ElysianDB 0.2.3 beperkt wat een pagina over origins heen kan doen:
+ElysianDB beperkt wat een pagina over origins heen kan doen:
 
 - De header `X-Request-Id` is niet toegestaan: een request met de optie `requestId` zakt voor de CORS-preflight. Laat `requestId` weg in browsers die een andere origin aanroepen.
 - Response-headers worden niet vrijgegeven: `health().version` is `null`, `error.requestId` en `error.retryAfter` zijn `undefined`, `send()` ziet alleen de headers die CORS standaard toestaat, zoals `Content-Type`, en `admin.backup()` noemt het bestand `elysiandb-backup.tar.gz`.
@@ -660,6 +663,16 @@ ElysianDB 0.2.3 beperkt wat een pagina over origins heen kan doen:
 | `logs()` / `exportLogs()` / `getLogLevel()` / `setLogLevel()` | `/monitoring/logs...` |
 | `metrics()` | `/metrics` |
 
+## Compatibiliteit
+
+De client volgt de versies van ElysianDB: client `0.X.y` is gemaakt voor ElysianDB `0.X`, en `y` telt de releases van de client zelf. De CI draait de integratietests tegen elke geteste ElysianDB-versie.
+
+| Client | ElysianDB | Getest in de CI |
+| --- | --- | --- |
+| 0.4.x | 0.4.x (Rust) | 0.4.0, en 0.3.0 (de laatste Go-versie) |
+
+ElysianDB 0.2.x wordt niet ondersteund door client 0.4. De 0.0.x-releases van de client zijn ouder dan dit schema.
+
 ## Migreren vanaf 0.0.x
 
 De meeste code blijft gewoon werken. Wat er verandert:
@@ -691,9 +704,9 @@ scripts/start-test-servers.sh /path/to/elysiandb
 npm run test:integration:local
 ```
 
-De CI bouwt ElysianDB 0.2.3 vanuit de broncode en draait beide testsuites.
+De CI draait beide testsuites tegen ElysianDB 0.4.0, vanuit de binary van het gepubliceerde image, en tegen 0.3.0, gebouwd vanuit de broncode.
 
-Voor een release voer je `make release` (of `make release VERSION=minor`) uit op een bijgewerkte `main`: dat verhoogt het versienummer en pusht de tag, waarna de Release-workflow de CI draait en het pakket met provenance naar npm publiceert. De workflow heeft de secret `NPM_TOKEN` nodig.
+Voor een release zet je de versie in een pull request (`npm version 0.4.1 --no-git-tag-version` en de entry in `CHANGELOG.md`), merge je die en voer je daarna `make release` uit op een bijgewerkte `main`, dat de tag `v0.4.1` aanmaakt en pusht: de Release-workflow draait de CI en publiceert het pakket met provenance naar npm, via npm trusted publishing (er wordt geen token opgeslagen).
 
 `README.md` is de referentiedocumentatie: pas die eerst aan en daarna de vertalingen in [`docs/i18n`](./), die niet naar npm worden gepubliceerd. `CHANGELOG.md` is alleen in het Engels beschikbaar.
 

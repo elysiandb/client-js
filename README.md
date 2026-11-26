@@ -7,7 +7,7 @@
 
 **English** · [Français](docs/i18n/README.fr.md) · [Español](docs/i18n/README.es.md) · [Deutsch](docs/i18n/README.de.md) · [Nederlands](docs/i18n/README.nl.md) · [Português](docs/i18n/README.pt.md) · [中文](docs/i18n/README.zh.md) · [한국어](docs/i18n/README.ko.md) · [日本語](docs/i18n/README.ja.md)
 
-The official client for [ElysianDB](https://github.com/elysiandb/elysiandb), the single-binary backend that turns JSON into a REST API. It covers the whole HTTP API of ElysianDB 0.2.3:
+The official client for [ElysianDB](https://github.com/elysiandb/elysiandb), the single-binary backend that turns JSON into a REST API. It covers the whole HTTP API of ElysianDB 0.4 (see [Compatibility](#compatibility)):
 
 - **Documents**: typed CRUD, batch writes, filters, search, sort, pagination, projections, includes, async iteration
 - **Query API**: `and` / `or` filter trees and sorts on several fields
@@ -41,6 +41,7 @@ It has no dependencies, ships ES modules, CommonJS and TypeScript types, and run
 - [Request hooks and raw requests](#request-hooks-and-raw-requests)
 - [Runtimes and browsers](#runtimes-and-browsers)
 - [API reference](#api-reference)
+- [Compatibility](#compatibility)
 - [Migrating from 0.0.x](#migrating-from-00x)
 - [Development](#development)
 
@@ -122,8 +123,10 @@ const db2 = new ElysianDB({ url: "http://localhost:8089", auth: { token: "my-sec
 Check that the server is up with `health()`. It never throws and needs no credentials:
 
 ```ts
-const { ok, version } = await db.health(); // { ok: true, status: 200, version: "0.2.3" }
+const { ok, version } = await db.health(); // { ok: true, status: 200, version: "0.4.0" }
 ```
+
+ElysianDB answers `503` until it has finished starting: `health()` then returns `{ ok: false, status: 503 }`.
 
 ## Authentication
 
@@ -237,9 +240,9 @@ await books.count({ filter: { year: { lt: 1970 } } });  // matching documents
 
 ## Names, IDs and keys
 
-Entity names, document IDs, keys, usernames and hook IDs go in URL paths, and ElysianDB 0.2.3 does not decode them consistently: a key or an ID that needs percent-encoding could be written but not read back. The client only accepts values made of letters (`A-Z`, `a-z`), digits and `- _ . ! ~ * ' ( ) : @ $ & + , ; =`, and throws a `TypeError` for anything else, such as spaces, accented letters, `/`, `?`, `#` or `%`. `create()` and `createMany()` check the `id` you pass the same way, so that every document can be read back.
+Entity names, document IDs, keys, usernames and hook IDs go in URL paths, and ElysianDB does not decode them consistently: a key or an ID that needs percent-encoding could be written but not read back. The client only accepts values made of letters (`A-Z`, `a-z`), digits and `- _ . ! ~ * ' ( ) : @ $ & + , ; =`, and throws a `TypeError` for anything else, such as spaces, accented letters, `/`, `?`, `#` or `%`. `create()` and `createMany()` check the `id` you pass the same way, so that every document can be read back.
 
-Entity names are stricter: letters, digits, `_`, `-` and `.`, without a leading `.`. ElysianDB builds its storage keys and patterns from them, so `:` or `*` would reach other entities: `db.entity("books:id").deleteAll()` would delete every book. Entity types created with other names, by another client, stay reachable with `db.request()` and `encodeURIComponent()`.
+Entity names are stricter: letters, digits, `_`, `-` and `.`, without a leading `.`. ElysianDB 0.2 built its storage keys and patterns from them, so `:` or `*` reached other entities, and the client keeps this rule so that names stay valid on every version. Entity types created with other names, by another client, stay reachable with `db.request()` and `encodeURIComponent()`.
 
 Some values are rejected because ElysianDB routes them elsewhere, or because `fetch` removes them from URLs:
 
@@ -250,8 +253,6 @@ Some values are rejected because ElysianDB routes them elsewhere, or because `fe
 | `count`, `schema` | Document ID in `get()`, `update()` and `create()` | `GET /api/books/count` counts the books. `exists()` and `delete()` still accept them. |
 | `mget` | Key in `kv.get()` and `kv.set()` | `GET /kv/mget` is the route of `mget()`. |
 | Keys with `*` | Key in `kv.get()` and `kv.set()` | `*` is the wildcard of `mget()` and `delete()`. |
-
-ElysianDB 0.2.3 also compares some storage keys without case: do not use entity names that differ only by case, since `deleteAll()` on `Books` drops the indexes of `books`.
 
 The client never follows HTTP redirects either, since a redirect would replay the request, credentials included, on another URL. A redirect fails with an `ElysianDBError` that gives the new location: check the URL of the server if you get one.
 
@@ -314,7 +315,7 @@ for await (const book of books.iterate({ pageSize: 500, sort: { year: "asc" } })
 
 Use a `sort` when you iterate over data that changes, so that pages stay stable.
 
-`iterate()` and `listAll()` stop at the first page shorter than `pageSize`, once `count()` confirms that every document was read. In `user` mode, ElysianDB 0.2.3 applies an ACL that grants `owning_read` but not `read` after `limit` and `offset`, so a page can be short, or empty, before the end: the client then fetches the remaining documents in one request. `list()` and `first()` cannot detect it, so they may return fewer documents than `limit` in that case.
+`iterate()` and `listAll()` stop at the first page shorter than `pageSize`, once `count()` confirms that every document was read. In `user` mode, ElysianDB applies an ACL that grants `owning_read` but not `read` after `limit` and `offset`, so a page can be short, or empty, before the end: the client then fetches the remaining documents in one request. `list()` and `first()` cannot detect it, so they may return fewer documents than `limit` in that case.
 
 ## Query API
 
@@ -367,7 +368,7 @@ const authorId = await db.transaction(async (tx) => {
 
 - Operations are queued on the server and applied on commit, all or none. A schema error, or an update of a document that no longer exists at that point, rejects the whole commit with a `400` error.
 - `tx.create()` returns the document with its `id`, generated by the client when missing, so that other documents of the transaction can link to it (`{ "@entity": "authors", id: author.id }`).
-- `tx.update()` only applies to documents that are already stored: ElysianDB 0.2.3 checks that the document exists when the update is queued, so updating a document created in the same transaction fails with a `400` error. Put every field in `tx.create()` instead.
+- `tx.update()` only applies to documents that are already stored: ElysianDB checks that the document exists when the update is queued, so updating a document created in the same transaction fails with a `400` error. Put every field in `tx.create()` instead.
 - Queued operations cannot be read back, by this client or any other, before the commit.
 - Operations and commits are never retried, so that nothing is queued or applied twice. ElysianDB never expires open transactions: when a commit gets no answer (network error, timeout or abort), the client rolls the transaction back. The commit may still have been applied if it reached ElysianDB, so check before you try again.
 - `tx.entity<T>("books")` gives typed `create`, `update` and `delete` for one entity.
@@ -478,7 +479,7 @@ await db.hooks.delete("books", hook.id);
 These calls need an admin in `user` mode.
 
 ```ts
-await db.admin.stats();   // { keys_count: 1203, uptime_seconds: 3605, version: "0.2.3", ... } (requires stats.enabled)
+await db.admin.stats();   // { keys_count: 1203, uptime_seconds: 3605, version: "0.4.0", ... } (requires stats.enabled)
 await db.admin.config();  // configuration, secrets redacted
 await db.admin.save();    // flush to disk now
 await db.admin.reset();   // delete every KV key (documents are kept)
@@ -504,7 +505,7 @@ const summary = await db.admin.restore(await readFile(filename)); // { status, e
 
 `filename` comes from the server, but it is always a plain `.tar.gz` file name without folder: the client replaces any other name with `elysiandb-backup.tar.gz`, so that the server cannot choose where you write.
 
-A restore replaces all the data and ends every session, the current one included. The HTTP API accepts archives up to 4 MB: use `elysiandb backup` and `elysiandb restore` for larger instances. Archives hold password hashes: store them like the data folder.
+A restore replaces all the data and ends every session, the current one included. There is no size limit: ElysianDB streams the backup and reads the archive of a restore as it arrives. Give large backups and restores a longer `timeout`, which covers the whole transfer. Archives hold password hashes: store them like the data folder.
 
 ## Monitoring
 
@@ -556,9 +557,9 @@ try {
 | `data` | Parsed response body |
 | `validationErrors` | `{ field, message, index?, entity?, id? }[]` for rejected writes, batch writes (`index`) and imports |
 | `requestId` | `X-Request-Id` of the answer |
-| `retryAfter` | Seconds to wait, after a `429` |
+| `retryAfter` | Seconds to wait, after a `429`, `503` or `507` |
 | `method`, `url` | The failed request |
-| `isNotFound`, `isUnauthorized`, `isForbidden`, `isConflict`, `isRateLimited`, `isValidationError`, `isAbort` | Shortcuts |
+| `isNotFound`, `isUnauthorized`, `isForbidden`, `isConflict`, `isRateLimited`, `isUnavailable` (`503`), `isStorageFull` (`507`), `isValidationError`, `isAbort` | Shortcuts |
 
 ## Timeouts, retries and cancellation
 
@@ -574,7 +575,9 @@ controller.abort(); // the call rejects with code "ABORTED"
 
 Per-call options are `signal`, `timeout`, `retries`, `requestId` (sent as `X-Request-Id`) and `headers`.
 
-Only idempotent requests (`GET`, `PUT`, `DELETE`) are retried, after a network error or a `429`, `502`, `503` or `504` answer. `POST` requests, such as `create()`, a login or a commit, and the operations of a transaction are never retried.
+Only idempotent requests (`GET`, `PUT`, `DELETE`) are retried, after a network error or a `429`, `502`, `503` or `504` answer. `POST` requests, such as `create()`, a login or a commit, and the operations of a transaction are never retried. The Query API (`query()`, `queryCount()` and `db.query()`) is the exception: it only reads, and ElysianDB can answer it with `503 server busy` under load.
+
+ElysianDB refuses writes when its disk is full (`507`, not retried) or failing (`503`), with `Retry-After: 30`: a retried write then waits 30 seconds.
 
 ## Request hooks and raw requests
 
@@ -605,7 +608,7 @@ headers.get("X-Elysian-Cache"); // "HIT" or "MISS"
 - Browsers can call ElysianDB from another origin only when that origin is listed in `server.http.cors.allowedOrigins`.
 - Do not ship admin credentials or the instance token to browsers.
 
-ElysianDB 0.2.3 limits what a page can do across origins:
+ElysianDB limits what a page can do across origins:
 
 - The `X-Request-Id` header is not allowed: a request with the `requestId` option fails its CORS preflight. Leave `requestId` out in browsers that call another origin.
 - Response headers are not exposed: `health().version` is `null`, `error.requestId` and `error.retryAfter` are `undefined`, `send()` only sees CORS-safelisted headers such as `Content-Type`, and `admin.backup()` names the file `elysiandb-backup.tar.gz`.
@@ -658,6 +661,16 @@ ElysianDB 0.2.3 limits what a page can do across origins:
 | `logs()` / `exportLogs()` / `getLogLevel()` / `setLogLevel()` | `/monitoring/logs...` |
 | `metrics()` | `/metrics` |
 
+## Compatibility
+
+The client follows the versions of ElysianDB: client `0.X.y` is made for ElysianDB `0.X`, and `y` counts the releases of the client itself. The CI runs the integration tests against each tested ElysianDB version.
+
+| Client | ElysianDB | Tested in CI |
+| --- | --- | --- |
+| 0.4.x | 0.4.x (Rust) | 0.4.0, and 0.3.0 (the last Go version) |
+
+ElysianDB 0.2.x is not supported by client 0.4. The 0.0.x releases of the client predate this scheme.
+
 ## Migrating from 0.0.x
 
 Most code keeps working. The changes:
@@ -689,9 +702,9 @@ scripts/start-test-servers.sh /path/to/elysiandb
 npm run test:integration:local
 ```
 
-The CI builds ElysianDB 0.2.3 from source and runs both suites.
+The CI runs both suites against ElysianDB 0.4.0, from the binary of its published image, and 0.3.0, built from source.
 
-To release, run `make release` (or `make release VERSION=minor`) on an up-to-date `main`: it bumps the version and pushes the tag, and the Release workflow runs the CI and publishes the package to npm with provenance. The workflow needs the `NPM_TOKEN` secret.
+To release, set the version in a pull request (`npm version 0.4.1 --no-git-tag-version` and the `CHANGELOG.md` entry), merge it, then run `make release` on an up-to-date `main`, which tags and pushes `v0.4.1`: the Release workflow runs the CI and publishes the package to npm with provenance, through npm trusted publishing (no token is stored).
 
 `README.md` is the reference documentation: change it first, then the translations in [`docs/i18n`](docs/i18n), which are not published to npm. `CHANGELOG.md` is in English only.
 

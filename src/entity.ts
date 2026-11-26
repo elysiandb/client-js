@@ -75,7 +75,7 @@ export class EntityClient<T extends { id: string } = Document> {
             if (page.length === pageSize) continue;
 
             // A short page is the last one, except in `user` mode when an ACL grants `owning_read` but not `read`:
-            // ElysianDB 0.2.3 applies it after `limit` and `offset`, so pages can be short, or even empty, before
+            // ElysianDB applies it after `limit` and `offset`, so pages can be short, or even empty, before
             // the end. `count()` applies the same ACL to every document.
             const { filter, search, includes } = listOptions;
             if (received >= (await this.count({ filter, search, includes }, call))) return;
@@ -237,7 +237,7 @@ export class EntityClient<T extends { id: string } = Document> {
     }
 }
 
-/** Entity names that ElysianDB 0.2.3 routes elsewhere: `/api/query` is the Query API, `/api/export` the export... */
+/** Entity names that ElysianDB routes elsewhere: `/api/query` is the Query API, `/api/export` the export... */
 const RESERVED_ENTITY_NAMES = new Set([
     "acl",
     "backup",
@@ -251,12 +251,13 @@ const RESERVED_ENTITY_NAMES = new Set([
     "tx",
 ]);
 
-/** Document IDs that ElysianDB 0.2.3 routes elsewhere: `GET /api/<entity>/count` counts the documents. */
+/** Document IDs that ElysianDB routes elsewhere: `GET /api/<entity>/count` counts the documents. */
 const RESERVED_IDS = new Set(["count", "schema"]);
 
 /**
- * Characters of an entity name. ElysianDB 0.2.3 builds storage keys (`api:entity:<name>:...`) and glob patterns
- * from it, so `:` and `*` would reach other entities: `entity("books:id").deleteAll()` deletes every book.
+ * Characters of an entity name. ElysianDB 0.2 built storage keys (`api:entity:<name>:...`) and glob patterns from
+ * it, so `:` and `*` reached other entities (`entity("books:id").deleteAll()` deleted every book). The rule is kept
+ * so that names stay valid on every version.
  */
 const ENTITY_NAME = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
 
@@ -265,8 +266,7 @@ export function entitySegment(name: string): string {
     segment(name, "entity name");
     if (!ENTITY_NAME.test(name)) {
         throw new TypeError(
-            `ElysianDB: invalid entity name ${JSON.stringify(name)}: use letters, digits, "_", "-" and ".", ` +
-                "since ElysianDB 0.2.3 builds storage keys and patterns from it",
+            `ElysianDB: invalid entity name ${JSON.stringify(name)}: use letters, digits, "_", "-" and "."`,
         );
     }
     if (RESERVED_ENTITY_NAMES.has(name)) {

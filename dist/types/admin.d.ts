@@ -147,7 +147,7 @@ export declare class AdminClient {
     backup(call?: CallOptions): Promise<Backup>;
     /**
      * Replaces all the data with a backup archive. Every session ends, including the current one.
-     * The HTTP API accepts archives up to 4 MB: use `elysiandb restore` for larger ones.
+     * There is no size limit: ElysianDB reads the archive as it arrives.
      */
     restore(archive: BackupArchive, call?: CallOptions): Promise<RestoreResult>;
 }
