@@ -9,7 +9,7 @@
 
 > Esta é uma tradução. O [README em inglês](../../README.md) é a referência e pode estar mais atualizado.
 
-O cliente oficial do [ElysianDB](https://github.com/elysiandb/elysiandb), o backend distribuído como um único binário que transforma JSON em API REST. Ele cobre toda a API HTTP do ElysianDB 0.2.3:
+O cliente oficial do [ElysianDB](https://github.com/elysiandb/elysiandb), o backend distribuído como um único binário que transforma JSON em API REST. Ele cobre toda a API HTTP do ElysianDB 0.4 (veja [Compatibilidade](#compatibilidade)):
 
 - **Documentos**: CRUD tipado, gravações em lote, filtros, pesquisa, ordenação, paginação, projeções, includes, iteração assíncrona
 - **Query API**: árvores de filtros `and` / `or` e ordenação por vários campos
@@ -43,6 +43,7 @@ Não tem dependências, é distribuído como módulos ES, CommonJS e tipos TypeS
 - [Hooks de requisição e requisições diretas](#hooks-de-requisição-e-requisições-diretas)
 - [Ambientes de execução e navegadores](#ambientes-de-execução-e-navegadores)
 - [Referência da API](#referência-da-api)
+- [Compatibilidade](#compatibilidade)
 - [Migração a partir da 0.0.x](#migração-a-partir-da-00x)
 - [Desenvolvimento](#desenvolvimento)
 
@@ -124,8 +125,10 @@ const db2 = new ElysianDB({ url: "http://localhost:8089", auth: { token: "my-sec
 Verifique se o servidor está disponível com `health()`. Esse método nunca lança erro e não precisa de credenciais:
 
 ```ts
-const { ok, version } = await db.health(); // { ok: true, status: 200, version: "0.2.3" }
+const { ok, version } = await db.health(); // { ok: true, status: 200, version: "0.4.0" }
 ```
+
+O ElysianDB responde `503` até terminar de iniciar: `health()` retorna então `{ ok: false, status: 503 }`.
 
 ## Autenticação
 
@@ -239,9 +242,9 @@ await books.count({ filter: { year: { lt: 1970 } } });  // matching documents
 
 ## Nomes, IDs e chaves
 
-Nomes de entidade, IDs de documento, chaves, nomes de usuário e IDs de hook vão nos caminhos das URLs, e o ElysianDB 0.2.3 não os decodifica de forma consistente: uma chave ou um ID que precise de percent-encoding poderia ser gravado, mas não lido de volta. O cliente só aceita valores compostos de letras (`A-Z`, `a-z`), dígitos e `- _ . ! ~ * ' ( ) : @ $ & + , ; =`, e lança um `TypeError` para qualquer outro caractere, como espaços, letras acentuadas, `/`, `?`, `#` ou `%`. `create()` e `createMany()` verificam da mesma forma o `id` recebido, para que todos os documentos possam ser lidos de volta.
+Nomes de entidade, IDs de documento, chaves, nomes de usuário e IDs de hook vão nos caminhos das URLs, e o ElysianDB não os decodifica de forma consistente: uma chave ou um ID que precise de percent-encoding poderia ser gravado, mas não lido de volta. O cliente só aceita valores compostos de letras (`A-Z`, `a-z`), dígitos e `- _ . ! ~ * ' ( ) : @ $ & + , ; =`, e lança um `TypeError` para qualquer outro caractere, como espaços, letras acentuadas, `/`, `?`, `#` ou `%`. `create()` e `createMany()` verificam da mesma forma o `id` recebido, para que todos os documentos possam ser lidos de volta.
 
-Os nomes de entidade são mais restritos: letras, dígitos, `_`, `-` e `.`, sem um `.` no início. O ElysianDB monta suas chaves de armazenamento e seus padrões a partir deles, então `:` ou `*` alcançariam outras entidades: `db.entity("books:id").deleteAll()` apagaria todos os livros. Tipos de entidade criados com outros nomes, por outro cliente, continuam acessíveis com `db.request()` e `encodeURIComponent()`.
+Os nomes de entidade são mais restritos: letras, dígitos, `_`, `-` e `.`, sem um `.` no início. O ElysianDB 0.2 montava suas chaves de armazenamento e seus padrões a partir deles, então `:` ou `*` alcançavam outras entidades, e o cliente mantém essa regra para que os nomes continuem válidos em todas as versões. Tipos de entidade criados com outros nomes, por outro cliente, continuam acessíveis com `db.request()` e `encodeURIComponent()`.
 
 Alguns valores são rejeitados porque o ElysianDB os encaminha para outras rotas, ou porque o `fetch` os remove das URLs:
 
@@ -252,8 +255,6 @@ Alguns valores são rejeitados porque o ElysianDB os encaminha para outras rotas
 | `count`, `schema` | ID de documento em `get()`, `update()` e `create()` | `GET /api/books/count` conta os livros. `exists()` e `delete()` ainda os aceitam. |
 | `mget` | Chave em `kv.get()` e `kv.set()` | `GET /kv/mget` é a rota de `mget()`. |
 | Chaves com `*` | Chave em `kv.get()` e `kv.set()` | `*` é o wildcard de `mget()` e `delete()`. |
-
-O ElysianDB 0.2.3 também compara algumas chaves de armazenamento sem diferenciar maiúsculas de minúsculas: não use nomes de entidade que se diferenciem apenas por maiúsculas e minúsculas, já que `deleteAll()` em `Books` descarta os índices de `books`.
 
 O cliente também nunca segue redirecionamentos HTTP, já que um redirecionamento repetiria a requisição, incluindo as credenciais, em outra URL. Um redirecionamento falha com um `ElysianDBError` que indica a nova localização: se isso acontecer, verifique a URL do servidor.
 
@@ -316,7 +317,7 @@ for await (const book of books.iterate({ pageSize: 500, sort: { year: "asc" } })
 
 Use um `sort` ao iterar sobre dados que mudam, para que as páginas se mantenham estáveis.
 
-`iterate()` e `listAll()` param na primeira página menor que `pageSize`, depois de `count()` confirmar que todos os documentos foram lidos. No modo `user`, o ElysianDB 0.2.3 aplica uma ACL que concede `owning_read` mas não `read` depois de `limit` e `offset`, de modo que uma página pode vir incompleta, ou vazia, antes do fim: nesse caso, o cliente busca os documentos restantes com uma única requisição. `list()` e `first()` não conseguem detectar essa situação e podem, portanto, retornar menos documentos do que `limit`.
+`iterate()` e `listAll()` param na primeira página menor que `pageSize`, depois de `count()` confirmar que todos os documentos foram lidos. No modo `user`, o ElysianDB aplica uma ACL que concede `owning_read` mas não `read` depois de `limit` e `offset`, de modo que uma página pode vir incompleta, ou vazia, antes do fim: nesse caso, o cliente busca os documentos restantes com uma única requisição. `list()` e `first()` não conseguem detectar essa situação e podem, portanto, retornar menos documentos do que `limit`.
 
 ## Query API
 
@@ -369,7 +370,7 @@ const authorId = await db.transaction(async (tx) => {
 
 - As operações ficam na fila do servidor e são aplicadas no commit, todas ou nenhuma. Um erro de esquema, ou a atualização de um documento que já não existe nesse momento, rejeita o commit inteiro com um erro `400`.
 - `tx.create()` retorna o documento com o seu `id`, gerado pelo cliente quando ausente, para que outros documentos da transação possam apontar para ele (`{ "@entity": "authors", id: author.id }`).
-- `tx.update()` só se aplica a documentos já armazenados: o ElysianDB 0.2.3 verifica se o documento existe no momento em que a atualização entra na fila, por isso atualizar um documento criado na mesma transação falha com um erro `400`. Em vez disso, coloque todos os campos no `tx.create()`.
+- `tx.update()` só se aplica a documentos já armazenados: o ElysianDB verifica se o documento existe no momento em que a atualização entra na fila, por isso atualizar um documento criado na mesma transação falha com um erro `400`. Em vez disso, coloque todos os campos no `tx.create()`.
 - As operações na fila não podem ser lidas antes do commit, nem por este cliente nem por nenhum outro.
 - Operações e commits nunca são repetidos, para que nada seja enfileirado ou aplicado duas vezes. O ElysianDB nunca expira transações abertas: quando um commit fica sem resposta (erro de rede, timeout ou cancelamento), o cliente faz o rollback da transação. O commit pode ter sido aplicado mesmo assim, se chegou ao ElysianDB, por isso verifique antes de tentar de novo.
 - `tx.entity<T>("books")` fornece `create`, `update` e `delete` tipados para uma entidade.
@@ -480,7 +481,7 @@ await db.hooks.delete("books", hook.id);
 Estas chamadas exigem um admin no modo `user`.
 
 ```ts
-await db.admin.stats();   // { keys_count: 1203, uptime_seconds: 3605, version: "0.2.3", ... } (requires stats.enabled)
+await db.admin.stats();   // { keys_count: 1203, uptime_seconds: 3605, version: "0.4.0", ... } (requires stats.enabled)
 await db.admin.config();  // configuration, secrets redacted
 await db.admin.save();    // flush to disk now
 await db.admin.reset();   // delete every KV key (documents are kept)
@@ -506,7 +507,7 @@ const summary = await db.admin.restore(await readFile(filename)); // { status, e
 
 `filename` vem do servidor, mas é sempre um nome de arquivo `.tar.gz` simples, sem pasta: o cliente substitui qualquer outro nome por `elysiandb-backup.tar.gz`, para que o servidor não possa escolher onde o arquivo é gravado.
 
-Uma restauração substitui todos os dados e encerra todas as sessões, incluindo a atual. A API HTTP aceita arquivos de até 4 MB: use `elysiandb backup` e `elysiandb restore` para instâncias maiores. Os arquivos de backup contêm hashes de senhas: guarde-os com o mesmo cuidado que a pasta de dados.
+Uma restauração substitui todos os dados e encerra todas as sessões, incluindo a atual. Não há limite de tamanho: o ElysianDB transmite o backup em streaming e lê o arquivo de uma restauração à medida que ele chega. Dê um `timeout` maior aos backups e restaurações grandes, já que ele cobre toda a transferência. Os arquivos de backup contêm hashes de senhas: guarde-os com o mesmo cuidado que a pasta de dados.
 
 ## Monitoramento
 
@@ -558,9 +559,9 @@ try {
 | `data` | Corpo da resposta, já desserializado |
 | `validationErrors` | `{ field, message, index?, entity?, id? }[]` para gravações rejeitadas, gravações em lote (`index`) e importações |
 | `requestId` | `X-Request-Id` da resposta |
-| `retryAfter` | Segundos a esperar, após um `429` |
+| `retryAfter` | Segundos a esperar, após um `429`, `503` ou `507` |
 | `method`, `url` | A requisição que falhou |
-| `isNotFound`, `isUnauthorized`, `isForbidden`, `isConflict`, `isRateLimited`, `isValidationError`, `isAbort` | Atalhos |
+| `isNotFound`, `isUnauthorized`, `isForbidden`, `isConflict`, `isRateLimited`, `isUnavailable` (`503`), `isStorageFull` (`507`), `isValidationError`, `isAbort` | Atalhos |
 
 ## Timeouts, novas tentativas e cancelamento
 
@@ -576,7 +577,9 @@ controller.abort(); // the call rejects with code "ABORTED"
 
 As opções por chamada são `signal`, `timeout`, `retries`, `requestId` (enviado como `X-Request-Id`) e `headers`.
 
-Só as requisições idempotentes (`GET`, `PUT`, `DELETE`) são repetidas, após um erro de rede ou uma resposta `429`, `502`, `503` ou `504`. As requisições `POST`, como `create()`, um login ou um commit, e as operações de uma transação nunca são repetidas.
+Só as requisições idempotentes (`GET`, `PUT`, `DELETE`) são repetidas, após um erro de rede ou uma resposta `429`, `502`, `503` ou `504`. As requisições `POST`, como `create()`, um login ou um commit, e as operações de uma transação nunca são repetidas. A Query API (`query()`, `queryCount()` e `db.query()`) é a exceção: ela só lê, e o ElysianDB pode respondê-la com `503 server busy` sob carga.
+
+O ElysianDB recusa gravações quando seu disco está cheio (`507`, sem nova tentativa) ou falhando (`503`), com `Retry-After: 30`: uma gravação repetida espera então 30 segundos.
 
 ## Hooks de requisição e requisições diretas
 
@@ -607,7 +610,7 @@ headers.get("X-Elysian-Cache"); // "HIT" or "MISS"
 - Um navegador só pode chamar o ElysianDB a partir de outra origem quando essa origem está listada em `server.http.cors.allowedOrigins`.
 - Não coloque credenciais de admin nem o token da instância em código executado no navegador.
 
-O ElysianDB 0.2.3 limita o que uma página pode fazer entre origens diferentes:
+O ElysianDB limita o que uma página pode fazer entre origens diferentes:
 
 - O cabeçalho `X-Request-Id` não é permitido: uma requisição com a opção `requestId` falha no preflight CORS. Não use `requestId` em navegadores que chamam outra origem.
 - Os cabeçalhos de resposta não são expostos: `health().version` é `null`, `error.requestId` e `error.retryAfter` são `undefined`, `send()` só vê os cabeçalhos da safelist CORS, como `Content-Type`, e `admin.backup()` dá ao arquivo o nome `elysiandb-backup.tar.gz`.
@@ -660,6 +663,16 @@ O ElysianDB 0.2.3 limita o que uma página pode fazer entre origens diferentes:
 | `logs()` / `exportLogs()` / `getLogLevel()` / `setLogLevel()` | `/monitoring/logs...` |
 | `metrics()` | `/metrics` |
 
+## Compatibilidade
+
+O cliente acompanha as versões do ElysianDB: o cliente `0.X.y` é feito para o ElysianDB `0.X`, e `y` conta as versões do próprio cliente. A CI executa os testes de integração em cada versão testada do ElysianDB.
+
+| Cliente | ElysianDB | Testado na CI |
+| --- | --- | --- |
+| 0.4.x | 0.4.x (Rust) | 0.4.0, e 0.3.0 (a última versão em Go) |
+
+O ElysianDB 0.2.x não é suportado pelo cliente 0.4. As versões 0.0.x do cliente são anteriores a esse esquema.
+
 ## Migração a partir da 0.0.x
 
 A maior parte do código não precisa de alterações. O que muda:
@@ -691,9 +704,9 @@ scripts/start-test-servers.sh /path/to/elysiandb
 npm run test:integration:local
 ```
 
-A CI compila o ElysianDB 0.2.3 a partir do código-fonte e executa os dois conjuntos de testes.
+A CI executa os dois conjuntos de testes no ElysianDB 0.4.0, a partir do binário da sua imagem publicada, e no 0.3.0, compilado a partir do código-fonte.
 
-Para publicar uma versão, execute `make release` (ou `make release VERSION=minor`) com a branch `main` atualizada: o comando incrementa a versão e faz push da tag, e o workflow Release executa a CI e publica o pacote no npm com proveniência. O workflow precisa do secret `NPM_TOKEN`.
+Para publicar uma versão, defina a versão em um pull request (`npm version 0.4.1 --no-git-tag-version` e a entrada do `CHANGELOG.md`), faça o merge e depois execute `make release` com a branch `main` atualizada, o que cria e faz push da tag `v0.4.1`: o workflow Release executa a CI e publica o pacote no npm com proveniência, por meio do npm trusted publishing (nenhum token é armazenado).
 
 `README.md` é a documentação de referência: altere-o primeiro e depois as traduções em [`docs/i18n`](./), que não são publicadas no npm. `CHANGELOG.md` existe apenas em inglês.
 

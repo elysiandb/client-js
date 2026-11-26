@@ -9,7 +9,7 @@
 
 > 이 문서는 번역본입니다. 기준 문서는 [영어 README](../../README.md)이며, 이 번역보다 더 최신 내용을 담고 있을 수 있습니다.
 
-[ElysianDB](https://github.com/elysiandb/elysiandb)의 공식 클라이언트입니다. ElysianDB는 JSON을 REST API로 바꿔 주는 단일 바이너리 백엔드입니다. 이 클라이언트는 ElysianDB 0.2.3의 HTTP API 전체를 지원합니다:
+[ElysianDB](https://github.com/elysiandb/elysiandb)의 공식 클라이언트입니다. ElysianDB는 JSON을 REST API로 바꿔 주는 단일 바이너리 백엔드입니다. 이 클라이언트는 ElysianDB 0.4의 HTTP API 전체를 지원합니다([호환성](#호환성) 참고):
 
 - **문서**: 타입이 지정된 CRUD, 일괄 쓰기, 필터, 검색, 정렬, 페이지네이션, 프로젝션, 연관 엔티티 포함(includes), 비동기 이터레이션
 - **Query API**: `and` / `or` 필터 트리, 여러 필드 기준 정렬
@@ -43,6 +43,7 @@
 - [요청 훅과 원시 요청](#요청-훅과-원시-요청)
 - [런타임과 브라우저](#런타임과-브라우저)
 - [API 레퍼런스](#api-레퍼런스)
+- [호환성](#호환성)
 - [0.0.x에서 마이그레이션](#00x에서-마이그레이션)
 - [개발](#개발)
 
@@ -124,8 +125,10 @@ const db2 = new ElysianDB({ url: "http://localhost:8089", auth: { token: "my-sec
 `health()`로 서버가 동작 중인지 확인합니다. 이 메서드는 예외를 던지지 않으며 자격 증명도 필요 없습니다:
 
 ```ts
-const { ok, version } = await db.health(); // { ok: true, status: 200, version: "0.2.3" }
+const { ok, version } = await db.health(); // { ok: true, status: 200, version: "0.4.0" }
 ```
+
+ElysianDB는 시작이 끝날 때까지 `503`으로 응답합니다. 이때 `health()`는 `{ ok: false, status: 503 }`을 반환합니다.
 
 ## 인증
 
@@ -239,9 +242,9 @@ await books.count({ filter: { year: { lt: 1970 } } });  // matching documents
 
 ## 이름, ID, 키
 
-엔티티 이름, 문서 ID, 키, 사용자 이름, 훅 ID는 URL 경로에 들어가는데, ElysianDB 0.2.3은 이를 일관되게 디코딩하지 않습니다. 그래서 퍼센트 인코딩이 필요한 키나 ID는 쓸 수는 있어도 다시 읽지 못할 수 있습니다. 클라이언트는 영문자(`A-Z`, `a-z`), 숫자, `- _ . ! ~ * ' ( ) : @ $ & + , ; =`로만 이루어진 값을 허용하며, 공백, 악센트가 있는 문자, `/`, `?`, `#`, `%` 등 그 밖의 문자가 들어 있으면 `TypeError`를 던집니다. 모든 문서를 다시 읽을 수 있도록 `create()`와 `createMany()`도 전달된 `id`를 같은 방식으로 검사합니다.
+엔티티 이름, 문서 ID, 키, 사용자 이름, 훅 ID는 URL 경로에 들어가는데, ElysianDB는 이를 일관되게 디코딩하지 않습니다. 그래서 퍼센트 인코딩이 필요한 키나 ID는 쓸 수는 있어도 다시 읽지 못할 수 있습니다. 클라이언트는 영문자(`A-Z`, `a-z`), 숫자, `- _ . ! ~ * ' ( ) : @ $ & + , ; =`로만 이루어진 값을 허용하며, 공백, 악센트가 있는 문자, `/`, `?`, `#`, `%` 등 그 밖의 문자가 들어 있으면 `TypeError`를 던집니다. 모든 문서를 다시 읽을 수 있도록 `create()`와 `createMany()`도 전달된 `id`를 같은 방식으로 검사합니다.
 
-엔티티 이름은 더 엄격합니다. 영문자, 숫자, `_`, `-`, `.`만 쓸 수 있으며 `.`로 시작할 수 없습니다. ElysianDB는 엔티티 이름으로 저장소 키와 패턴을 만들기 때문에 `:`나 `*`가 들어가면 다른 엔티티에까지 영향을 줍니다. `db.entity("books:id").deleteAll()`은 모든 책을 삭제하게 됩니다. 다른 클라이언트가 다른 이름으로 만든 엔티티 타입은 `db.request()`와 `encodeURIComponent()`로 계속 접근할 수 있습니다.
+엔티티 이름은 더 엄격합니다. 영문자, 숫자, `_`, `-`, `.`만 쓸 수 있으며 `.`로 시작할 수 없습니다. ElysianDB 0.2는 엔티티 이름으로 저장소 키와 패턴을 만들었기 때문에 `:`나 `*`가 들어가면 다른 엔티티에까지 영향을 주었습니다. 클라이언트는 이름이 모든 버전에서 유효하도록 이 규칙을 유지합니다. 다른 클라이언트가 다른 이름으로 만든 엔티티 타입은 `db.request()`와 `encodeURIComponent()`로 계속 접근할 수 있습니다.
 
 일부 값은 ElysianDB가 다른 라우트로 처리하거나 `fetch`가 URL에서 제거하기 때문에 거부됩니다:
 
@@ -252,8 +255,6 @@ await books.count({ filter: { year: { lt: 1970 } } });  // matching documents
 | `count`, `schema` | `get()`, `update()`, `create()`의 문서 ID | `GET /api/books/count`는 책의 개수를 셉니다. `exists()`와 `delete()`에서는 계속 사용할 수 있습니다. |
 | `mget` | `kv.get()`과 `kv.set()`의 키 | `GET /kv/mget`은 `mget()`의 라우트입니다. |
 | `*`가 들어간 키 | `kv.get()`과 `kv.set()`의 키 | `*`는 `mget()`과 `delete()`의 와일드카드입니다. |
-
-또한 ElysianDB 0.2.3은 일부 저장소 키를 대소문자 구분 없이 비교합니다. 대소문자만 다른 엔티티 이름은 사용하지 마세요. `Books`에 `deleteAll()`을 호출하면 `books`의 인덱스가 삭제됩니다.
 
 또한 클라이언트는 HTTP 리디렉션을 따르지 않습니다. 리디렉션을 따르면 자격 증명을 포함한 요청이 다른 URL로 다시 전송되기 때문입니다. 리디렉션은 새 위치를 알려 주는 `ElysianDBError`로 실패하며, 이 오류가 발생하면 서버 URL을 확인하세요.
 
@@ -316,7 +317,7 @@ for await (const book of books.iterate({ pageSize: 500, sort: { year: "asc" } })
 
 변경되는 데이터를 순회할 때는 페이지가 안정적으로 유지되도록 `sort`를 지정하세요.
 
-`iterate()`와 `listAll()`은 `pageSize`보다 짧은 첫 페이지에서, `count()`로 모든 문서를 읽었는지 확인한 뒤 멈춥니다. `user` 모드에서 ElysianDB 0.2.3은 `read` 없이 `owning_read`만 부여하는 ACL을 `limit`과 `offset` 이후에 적용하므로, 끝에 도달하기 전에 페이지가 짧거나 비어 있을 수 있습니다. 이때 클라이언트는 남은 문서를 한 번의 요청으로 가져옵니다. `list()`와 `first()`는 이를 감지할 수 없으므로, 이 경우 `limit`보다 적은 문서를 반환할 수 있습니다.
+`iterate()`와 `listAll()`은 `pageSize`보다 짧은 첫 페이지에서, `count()`로 모든 문서를 읽었는지 확인한 뒤 멈춥니다. `user` 모드에서 ElysianDB는 `read` 없이 `owning_read`만 부여하는 ACL을 `limit`과 `offset` 이후에 적용하므로, 끝에 도달하기 전에 페이지가 짧거나 비어 있을 수 있습니다. 이때 클라이언트는 남은 문서를 한 번의 요청으로 가져옵니다. `list()`와 `first()`는 이를 감지할 수 없으므로, 이 경우 `limit`보다 적은 문서를 반환할 수 있습니다.
 
 ## Query API
 
@@ -369,7 +370,7 @@ const authorId = await db.transaction(async (tx) => {
 
 - 작업은 서버의 큐에 쌓였다가 커밋 시점에 전부 적용되거나 전혀 적용되지 않습니다. 스키마 오류가 있거나, 그 시점에 더 이상 존재하지 않는 문서를 수정하려 하면 커밋 전체가 `400` 오류로 거부됩니다.
 - `tx.create()`는 `id`가 포함된 문서를 반환하며, `id`가 없으면 클라이언트가 생성합니다. 덕분에 같은 트랜잭션의 다른 문서가 이 문서를 링크할 수 있습니다(`{ "@entity": "authors", id: author.id }`).
-- `tx.update()`는 이미 저장된 문서에만 적용됩니다. ElysianDB 0.2.3은 수정 작업이 큐에 들어갈 때 문서가 존재하는지 확인하므로, 같은 트랜잭션에서 생성한 문서를 수정하면 `400` 오류로 실패합니다. 대신 모든 필드를 `tx.create()`에 넣으세요.
+- `tx.update()`는 이미 저장된 문서에만 적용됩니다. ElysianDB는 수정 작업이 큐에 들어갈 때 문서가 존재하는지 확인하므로, 같은 트랜잭션에서 생성한 문서를 수정하면 `400` 오류로 실패합니다. 대신 모든 필드를 `tx.create()`에 넣으세요.
 - 큐에 쌓인 작업은 커밋 전까지 이 클라이언트든 다른 클라이언트든 다시 읽을 수 없습니다.
 - 같은 작업이 두 번 큐에 쌓이거나 적용되지 않도록, 작업과 커밋은 절대 재시도하지 않습니다. ElysianDB는 열린 트랜잭션을 만료시키지 않으므로, 커밋에 응답이 없으면(네트워크 오류, 타임아웃, 중단) 클라이언트가 트랜잭션을 롤백합니다. 커밋이 ElysianDB에 도달했다면 이미 적용되었을 수도 있으니, 다시 시도하기 전에 확인하세요.
 - `tx.entity<T>("books")`는 한 엔티티에 대해 타입이 지정된 `create`, `update`, `delete`를 제공합니다.
@@ -480,7 +481,7 @@ await db.hooks.delete("books", hook.id);
 `user` 모드에서는 다음 호출에 관리자 권한이 필요합니다.
 
 ```ts
-await db.admin.stats();   // { keys_count: 1203, uptime_seconds: 3605, version: "0.2.3", ... } (requires stats.enabled)
+await db.admin.stats();   // { keys_count: 1203, uptime_seconds: 3605, version: "0.4.0", ... } (requires stats.enabled)
 await db.admin.config();  // configuration, secrets redacted
 await db.admin.save();    // flush to disk now
 await db.admin.reset();   // delete every KV key (documents are kept)
@@ -506,7 +507,7 @@ const summary = await db.admin.restore(await readFile(filename)); // { status, e
 
 `filename`은 서버가 제공하지만, 항상 폴더 경로가 없는 단순한 `.tar.gz` 파일 이름입니다. 서버가 파일을 쓸 위치를 정할 수 없도록, 클라이언트는 그 밖의 이름을 모두 `elysiandb-backup.tar.gz`로 바꿉니다.
 
-복원은 모든 데이터를 교체하고 현재 세션을 포함한 모든 세션을 종료합니다. HTTP API는 최대 4 MB의 아카이브만 받으므로, 더 큰 인스턴스에는 `elysiandb backup`과 `elysiandb restore`를 사용하세요. 아카이브에는 비밀번호 해시가 들어 있으므로 데이터 폴더와 같은 수준으로 보관하세요.
+복원은 모든 데이터를 교체하고 현재 세션을 포함한 모든 세션을 종료합니다. 크기 제한은 없습니다. ElysianDB는 백업을 스트리밍으로 전송하고, 복원 아카이브도 도착하는 대로 읽습니다. 큰 백업과 복원에는 `timeout`을 더 길게 지정하세요. `timeout`은 전송 전체에 적용됩니다. 아카이브에는 비밀번호 해시가 들어 있으므로 데이터 폴더와 같은 수준으로 보관하세요.
 
 ## 모니터링
 
@@ -558,9 +559,9 @@ try {
 | `data` | 파싱된 응답 본문 |
 | `validationErrors` | 거부된 쓰기, 일괄 쓰기(`index`), 가져오기에 대한 `{ field, message, index?, entity?, id? }[]` |
 | `requestId` | 응답의 `X-Request-Id` |
-| `retryAfter` | `429` 이후 기다려야 하는 시간(초) |
+| `retryAfter` | `429`, `503`, `507` 이후 기다려야 하는 시간(초) |
 | `method`, `url` | 실패한 요청 |
-| `isNotFound`, `isUnauthorized`, `isForbidden`, `isConflict`, `isRateLimited`, `isValidationError`, `isAbort` | 단축 속성 |
+| `isNotFound`, `isUnauthorized`, `isForbidden`, `isConflict`, `isRateLimited`, `isUnavailable` (`503`), `isStorageFull` (`507`), `isValidationError`, `isAbort` | 단축 속성 |
 
 ## 타임아웃, 재시도, 취소
 
@@ -576,7 +577,9 @@ controller.abort(); // the call rejects with code "ABORTED"
 
 호출별 옵션은 `signal`, `timeout`, `retries`, `requestId`(`X-Request-Id`로 전송), `headers`입니다.
 
-네트워크 오류나 `429`, `502`, `503`, `504` 응답 후에는 멱등 요청(`GET`, `PUT`, `DELETE`)만 재시도합니다. `create()`, 로그인, 커밋 같은 `POST` 요청과 트랜잭션 작업은 절대 재시도하지 않습니다.
+네트워크 오류나 `429`, `502`, `503`, `504` 응답 후에는 멱등 요청(`GET`, `PUT`, `DELETE`)만 재시도합니다. `create()`, 로그인, 커밋 같은 `POST` 요청과 트랜잭션 작업은 절대 재시도하지 않습니다. 단, Query API(`query()`, `queryCount()`, `db.query()`)는 예외입니다. 읽기만 하며, 부하가 높을 때 ElysianDB가 `503 server busy`로 응답할 수 있기 때문입니다.
+
+ElysianDB는 디스크가 가득 찼을 때(`507`, 재시도하지 않음)나 디스크에 장애가 있을 때(`503`) `Retry-After: 30`과 함께 쓰기를 거부합니다. 이 경우 재시도되는 쓰기는 30초를 기다립니다.
 
 ## 요청 훅과 원시 요청
 
@@ -607,7 +610,7 @@ headers.get("X-Elysian-Cache"); // "HIT" or "MISS"
 - 브라우저는 해당 출처가 `server.http.cors.allowedOrigins`에 등록된 경우에만 다른 출처에서 ElysianDB를 호출할 수 있습니다.
 - 관리자 자격 증명이나 인스턴스 토큰을 브라우저에 배포하지 마세요.
 
-ElysianDB 0.2.3에서는 다른 출처의 페이지가 할 수 있는 일에 다음과 같은 제약이 있습니다:
+ElysianDB에서는 다른 출처의 페이지가 할 수 있는 일에 다음과 같은 제약이 있습니다:
 
 - `X-Request-Id` 헤더가 허용되지 않으므로, `requestId` 옵션을 쓴 요청은 CORS 프리플라이트에서 실패합니다. 다른 출처를 호출하는 브라우저에서는 `requestId`를 생략하세요.
 - 응답 헤더가 노출되지 않습니다. `health().version`은 `null`, `error.requestId`와 `error.retryAfter`는 `undefined`가 되고, `send()`는 `Content-Type` 같은 CORS 허용 목록(safelist) 헤더만 볼 수 있으며, `admin.backup()`은 파일 이름을 `elysiandb-backup.tar.gz`로 지정합니다.
@@ -660,6 +663,16 @@ ElysianDB 0.2.3에서는 다른 출처의 페이지가 할 수 있는 일에 다
 | `logs()` / `exportLogs()` / `getLogLevel()` / `setLogLevel()` | `/monitoring/logs...` |
 | `metrics()` | `/metrics` |
 
+## 호환성
+
+클라이언트는 ElysianDB의 버전을 따릅니다. 클라이언트 `0.X.y`는 ElysianDB `0.X`용이며, `y`는 클라이언트 자체의 릴리스를 셉니다. CI는 테스트 대상인 각 ElysianDB 버전에 대해 통합 테스트를 실행합니다.
+
+| 클라이언트 | ElysianDB | CI 테스트 버전 |
+| --- | --- | --- |
+| 0.4.x | 0.4.x (Rust) | 0.4.0, 그리고 0.3.0(마지막 Go 버전) |
+
+클라이언트 0.4는 ElysianDB 0.2.x를 지원하지 않습니다. 클라이언트의 0.0.x 릴리스는 이 방식보다 먼저 나왔습니다.
+
 ## 0.0.x에서 마이그레이션
 
 대부분의 코드는 그대로 동작합니다. 변경 사항은 다음과 같습니다:
@@ -691,9 +704,9 @@ scripts/start-test-servers.sh /path/to/elysiandb
 npm run test:integration:local
 ```
 
-CI는 ElysianDB 0.2.3을 소스에서 빌드하고 두 테스트 스위트를 모두 실행합니다.
+CI는 게시된 이미지의 바이너리로 실행한 ElysianDB 0.4.0과, 소스에서 빌드한 0.3.0을 대상으로 두 테스트 스위트를 모두 실행합니다.
 
-릴리스하려면 최신 상태의 `main`에서 `make release`(또는 `make release VERSION=minor`)를 실행합니다. 이 명령은 버전을 올리고 태그를 푸시하며, 이어서 Release 워크플로가 CI를 실행한 뒤 provenance와 함께 패키지를 npm에 배포합니다. 이 워크플로에는 `NPM_TOKEN` 시크릿이 필요합니다.
+릴리스하려면 풀 리퀘스트에서 버전을 설정하고(`npm version 0.4.1 --no-git-tag-version`과 `CHANGELOG.md` 항목) 이를 병합한 다음, 최신 상태의 `main`에서 `make release`를 실행합니다. 이 명령이 `v0.4.1` 태그를 만들어 푸시하면, Release 워크플로가 CI를 실행한 뒤 npm trusted publishing을 통해 provenance와 함께 패키지를 npm에 배포합니다(토큰은 저장하지 않습니다).
 
 `README.md`가 기준 문서입니다. 먼저 이 문서를 수정한 다음 [`docs/i18n`](./)의 번역본을 수정하세요. 번역본은 npm에 배포되지 않습니다. `CHANGELOG.md`는 영어로만 작성합니다.
 
